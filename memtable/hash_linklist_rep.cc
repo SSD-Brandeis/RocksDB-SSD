@@ -7,6 +7,11 @@
 #include <algorithm>
 #include <atomic>
 
+#ifdef PROFILE
+#include <chrono>
+#include <iostream>
+#endif  // PROFILE
+
 #include "db/memtable.h"
 #include "memory/arena.h"
 #include "memtable/skiplist.h"
@@ -579,11 +584,24 @@ Node* HashLinkListRep::GetLinkListFirstNode(Pointer& bucket_pointer) const {
 }
 
 void HashLinkListRep::Insert(KeyHandle handle) {
+#ifdef PROFILE
+  auto start_time = std::chrono::high_resolution_clock::now();
+#endif  // PROFILE
   Node* x = static_cast<Node*>(handle);
   assert(!Contains(x->key));
   Slice internal_key = GetLengthPrefixedSlice(x->key);
   auto transformed = GetPrefix(internal_key);
   auto& bucket = buckets_[GetHash(transformed)];
+  // std::cout << " Internal Key: " << internal_key.ToStringView() <<  " ===> Transformed: " << transformed.ToStringView() << " :::: Bucket: " << GetHash(transformed) << std::endl << std::flush;
+// #ifdef PROFILE
+//   auto end_time = std::chrono::high_resolution_clock::now();
+//   std::cout << "ComputeHashTime: "
+//             << std::chrono::duration_cast<std::chrono::nanoseconds>(end_time -
+//                                                                      start_time)
+//                    .count()
+//             << std::endl
+//             << std::flush;
+// #endif  // PROFILE
   Pointer* first_next_pointer =
       static_cast<Pointer*>(bucket.load(std::memory_order_relaxed));
 
@@ -593,6 +611,15 @@ void HashLinkListRep::Insert(KeyHandle handle) {
     // we publish a pointer to "x" in prev[i].
     x->NoBarrier_SetNext(nullptr);
     bucket.store(x, std::memory_order_release);
+#ifdef PROFILE
+    auto iend_time = std::chrono::high_resolution_clock::now();
+    std::cout << "InsertTime, "
+              << std::chrono::duration_cast<std::chrono::nanoseconds>(
+                     iend_time - start_time)
+                     .count()
+              << std::endl
+              << std::flush;
+#endif  // PROFILE
     return;
   }
 
@@ -620,6 +647,15 @@ void HashLinkListRep::Insert(KeyHandle handle) {
       // incremental.
       skip_list_bucket_header->Counting_header.IncNumEntries();
       skip_list_bucket_header->skip_list.Insert(x->key);
+#ifdef PROFILE
+      auto iend_time = std::chrono::high_resolution_clock::now();
+      std::cout << "InsertTime, "
+                << std::chrono::duration_cast<std::chrono::nanoseconds>(
+                       iend_time - start_time)
+                       .count()
+                << std::endl
+                << std::flush;
+#endif  // PROFILE
       return;
     }
   }
@@ -699,6 +735,15 @@ void HashLinkListRep::Insert(KeyHandle handle) {
       header->next.store(static_cast<void*>(x), std::memory_order_release);
     }
   }
+#ifdef PROFILE
+  auto iend_time = std::chrono::high_resolution_clock::now();
+  std::cout << "InsertTime, "
+            << std::chrono::duration_cast<std::chrono::nanoseconds>(iend_time -
+                                                                     start_time)
+                   .count()
+            << std::endl
+            << std::flush;
+#endif  // PROFILE
 }
 
 bool HashLinkListRep::Contains(const char* key) const {
@@ -729,6 +774,9 @@ size_t HashLinkListRep::ApproximateMemoryUsage() {
 
 void HashLinkListRep::Get(const LookupKey& k, void* callback_args,
                           bool (*callback_func)(void* arg, const char* entry)) {
+#ifdef PROFILE
+  auto start_time = std::chrono::high_resolution_clock::now();
+#endif  // PROFILE
   auto transformed = transform_->Transform(k.user_key());
   Pointer& bucket = GetBucket(transformed);
 
@@ -754,6 +802,15 @@ void HashLinkListRep::Get(const LookupKey& k, void* callback_args,
       }
     }
   }
+#ifdef PROFILE
+  auto end_time = std::chrono::high_resolution_clock::now();
+  std::cout << "PointQueryTime, "
+            << std::chrono::duration_cast<std::chrono::nanoseconds>(end_time -
+                                                                     start_time)
+                   .count()
+            << std::endl
+            << std::flush;
+#endif  // PROFILE
 }
 
 MemTableRep::Iterator* HashLinkListRep::GetIterator(Arena* alloc_arena) {
