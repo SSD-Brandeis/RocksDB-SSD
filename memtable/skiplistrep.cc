@@ -5,6 +5,11 @@
 //
 #include <random>
 
+#ifdef PROFILE
+#include <chrono>
+#include <iostream>
+#endif  // PROFILE
+
 #include "db/memtable.h"
 #include "memory/arena.h"
 #include "memtable/inlineskiplist.h"
@@ -44,7 +49,20 @@ class SkipListRep : public MemTableRep {
   }
 
   bool InsertKey(KeyHandle handle) override {
-    return skip_list_.Insert(static_cast<char*>(handle));
+#ifdef PROFILE
+    auto start_time = std::chrono::high_resolution_clock::now();
+#endif  // PROFILE
+    auto res = skip_list_.Insert(static_cast<char*>(handle));
+#ifdef PROFILE
+    auto end_time = std::chrono::high_resolution_clock::now();
+    std::cout << "InsertTime: "
+              << std::chrono::duration_cast<std::chrono::nanoseconds>(
+                     end_time - start_time)
+                     .count()
+              << std::endl
+              << std::flush;
+#endif  // PROFILE
+    return res;
   }
 
   void InsertWithHint(KeyHandle handle, void** hint) override {
@@ -84,12 +102,24 @@ class SkipListRep : public MemTableRep {
 
   void Get(const LookupKey& k, void* callback_args,
            bool (*callback_func)(void* arg, const char* entry)) override {
+#ifdef PROFILE
+  auto start_time = std::chrono::high_resolution_clock::now();
+#endif  // PROFILE
     SkipListRep::Iterator iter(&skip_list_);
     Slice dummy_slice;
     for (iter.Seek(dummy_slice, k.memtable_key().data());
          iter.Valid() && callback_func(callback_args, iter.key());
          iter.Next()) {
     }
+#ifdef PROFILE
+  auto end_time = std::chrono::high_resolution_clock::now();
+  std::cout << "PointQueryTime: "
+            << std::chrono::duration_cast<std::chrono::nanoseconds>(end_time -
+                                                                     start_time)
+                   .count()
+            << std::endl
+            << std::flush;
+#endif  // PROFILE
   }
 
   Status GetAndValidate(const LookupKey& k, void* callback_args,
