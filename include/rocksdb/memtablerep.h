@@ -525,4 +525,6 @@ MemTableRepFactory* NewHashLinkListRepFactory(
     bool if_log_bucket_dist_when_flash = true,
     uint32_t threshold_use_skiplist = 256);
 
+MemTableRepFactory* NewLinkListRepFactory();
+
 }  // namespace ROCKSDB_NAMESPACE
