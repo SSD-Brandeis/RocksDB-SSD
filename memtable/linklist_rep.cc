@@ -1,9 +1,4 @@
-// #define PROFILE
 
-#ifdef PROFILE
-#include <chrono>
-#include <iostream>
-#endif
 
 #include <assert.h>
 #include <stddef.h>
@@ -134,8 +129,7 @@ LinkListRep::LinkListRep(const MemTableRep::KeyComparator& compare,
       sorted_(false) {}
 
 LinkListRep::~LinkListRep() {
-#ifdef PROFILE
-#endif
+
 }
 
 KeyHandle LinkListRep::Allocate(const size_t len, char** buf) {
@@ -149,9 +143,7 @@ KeyHandle LinkListRep::Allocate(const size_t len, char** buf) {
 }
 
 void LinkListRep::Insert(KeyHandle handle) {
-#ifdef PROFILE
-  auto start_time = std::chrono::high_resolution_clock::now();
-#endif
+
   WriteLock l(&rwlock_);
   assert(!immutable_);
 
@@ -167,12 +159,7 @@ void LinkListRep::Insert(KeyHandle handle) {
 
   node_pointers_.push_back(node);
 
-#ifdef PROFILE
-  auto end_time = std::chrono::high_resolution_clock::now();
-  uint64_t insert_duration =
-      std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();
-  std::cout << "InsertTime: " << insert_duration << " ns" << std::endl << std::flush;
-#endif
+
 }
 
 bool LinkListRep::Contains(const char* key) const {
@@ -193,9 +180,7 @@ size_t LinkListRep::ApproximateMemoryUsage() {
 
 void LinkListRep::Get(const LookupKey& k, void* callback_args,
                       bool (*callback_func)(void* arg, const char* entry)) {
-#ifdef PROFILE
-  auto start_time = std::chrono::high_resolution_clock::now();
-#endif
+
 
   rwlock_.ReadLock();
   LinkListRep* linklist_rep;
@@ -207,21 +192,13 @@ void LinkListRep::Get(const LookupKey& k, void* callback_args,
     snapshot = entries_;
   } else {
     linklist_rep = nullptr;
-#ifdef PROFILE
-    auto snap_start = std::chrono::high_resolution_clock::now();
-#endif
+
     snapshot = std::make_shared<std::vector<const char*>>();
     snapshot->resize(node_pointers_.size());
     for (size_t i = 0; i < node_pointers_.size(); i++) {
       (*snapshot)[i] = node_pointers_[i]->Key();
     }
-#ifdef PROFILE
-    auto snap_end = std::chrono::high_resolution_clock::now();
-    uint64_t snap_dur =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(snap_end - snap_start).count();
-    total_snapshot_creation_time_ns_.fetch_add(snap_dur);
-    std::cout << "SnapshotCreationTime(Get): " << snap_dur << " ns" << std::endl;
-#endif
+
   }
 
   Iterator iter(linklist_rep, snapshot, compare_);
@@ -232,12 +209,7 @@ void LinkListRep::Get(const LookupKey& k, void* callback_args,
        iter.Next()) {
   }
 
-#ifdef PROFILE
-  auto end_time = std::chrono::high_resolution_clock::now();
-  uint64_t point_query_time =
-      std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();
-  std::cout << "PointQueryTime: " << point_query_time << " ns" << std::endl << std::flush;
-#endif
+
 }
 
 MemTableRep::Iterator* LinkListRep::GetIterator(Arena* arena) {
@@ -255,21 +227,13 @@ MemTableRep::Iterator* LinkListRep::GetIterator(Arena* arena) {
     snapshot = entries_;
   } else {
     linklist_rep = nullptr;
-#ifdef PROFILE
-    auto snap_start = std::chrono::high_resolution_clock::now();
-#endif
+
     snapshot = std::make_shared<std::vector<const char*>>();
     snapshot->resize(node_pointers_.size());
     for (size_t i = 0; i < node_pointers_.size(); i++) {
       (*snapshot)[i] = node_pointers_[i]->Key();
     }
-#ifdef PROFILE
-    auto snap_end = std::chrono::high_resolution_clock::now();
-    uint64_t snap_dur =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(snap_end - snap_start).count();
-    total_snapshot_creation_time_ns_.fetch_add(snap_dur);
-    std::cout << "SnapshotCreationTime(Get): " << snap_dur << " ns" << std::endl;
-#endif
+
   }
 
   Iterator* it;
@@ -389,22 +353,12 @@ void LinkListRep::Iterator::SeekToLast() {
 void LinkListRep::Iterator::DoSort() const {
   if (sorted_) return;
 
-#ifdef PROFILE
-  auto start_time = std::chrono::high_resolution_clock::now();
-#endif
+
   std::sort(snapshot_->begin(), snapshot_->end(),
             [this](const char* a, const char* b) {
               return compare_(a, b) < 0;
             });
-#ifdef PROFILE
-  auto end_time = std::chrono::high_resolution_clock::now();
-  uint64_t sorting_duration =
-      std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();
-  std::cout << "SortingTime: " << sorting_duration << " ns" << std::endl << std::flush;
-  if (rep_ != nullptr) {
-    rep_->total_sorting_time_ns_.fetch_add(sorting_duration);
-  }
-#endif
+
 
   sorted_ = true;
 }
