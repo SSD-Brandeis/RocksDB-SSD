@@ -448,35 +448,33 @@ public:
   }
 
   void Insert(KeyHandle handle) override {
-  auto* key = static_cast<char*>(handle);
-  WriteLock l(&rwlock_);
-  assert(!immutable_);
-  auto position = std::lower_bound(bucket_->begin(), bucket_->end(), key);
-  bucket_->insert(position, key);
+    auto* key = static_cast<char*>(handle);
+    WriteLock l(&rwlock_);
+    assert(!immutable_);
+    const auto position = std::lower_bound(
+      bucket_->begin(),
+      bucket_->end(),
+      key, [this](const char *a, const char *b) {
+        return compare_(a, b) < 0;
+      });
+    bucket_->insert(position, key);
   };
 
-  void Get(const LookupKey &k, void *callback_args, bool(*callback_func)(void *arg, const char *entry)) override {
-  rwlock_.ReadLock();
-  AlwaysSortedVectorRep* vector_rep = this;
-  // std::shared_ptr<Bucket> bucket;
-  // if (immutable_) {
-  //   if (!sorted_) {
-  //     std::sort(bucket_->begin(), bucket_->end(),
-  //               stl_wrappers::Compare(compare_));
-  //   }
-  //   vector_rep = this;
-  // } else {
-  //   vector_rep = nullptr;
-  //   bucket.reset(new Bucket(*bucket_));
-  // }
+  void Get(const LookupKey &k, void *callback_args, bool (*callback_func)(void *arg, const char *entry)) override {
+    rwlock_.ReadLock();
+    const auto vector_rep = this;
+    const auto bucket = std::make_shared<Bucket>(*bucket_);
 
-  AlwaysSortedVectorRep::Iterator iter(vector_rep,  bucket_,
-                                   compare_);
-  rwlock_.ReadUnlock();
+    AlwaysSortedVectorRep::Iterator iter(vector_rep, bucket,
+                                         compare_);
+    rwlock_.ReadUnlock();
 
-  for (iter.Seek(k.user_key(), k.memtable_key().data());
-       iter.Valid() && callback_func(callback_args, iter.key()); iter.Next()) {
-  }
+    for (
+      iter.Seek(k.user_key(), k.memtable_key().data());
+      iter.Valid() && callback_func(callback_args, iter.key());
+      iter.Next()
+    ) {
+    }
   }
 
   class Iterator : public MemTableRep::Iterator {
