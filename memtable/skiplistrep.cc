@@ -14,6 +14,9 @@
 #include "rocksdb/utilities/options_type.h"
 #include "util/string_util.h"
 
+#include <chrono>
+#include <iostream>
+#define TIMER
 namespace ROCKSDB_NAMESPACE {
 namespace {
 class SkipListRep : public MemTableRep {
@@ -42,17 +45,36 @@ class SkipListRep : public MemTableRep {
   // Insert key into the list.
   // REQUIRES: nothing that compares equal to key is currently in the list.
   void Insert(KeyHandle handle) override {
+    // std::cout << "Insert Called!" << std::endl;
+    #ifdef TIMER
+    auto start = std::chrono::high_resolution_clock::now();
+    #endif
     skip_list_.Insert(static_cast<char*>(handle));
+    #ifdef TIMER
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+    std::cout << "SkipList_Insert: " << duration.count() << ", " << std::flush;
+    #endif
   }
 
   bool InsertKey(KeyHandle handle) override {
-
+    // std::cout << "InsertKey called!" << std::endl;
+    #ifdef TIMER
+    auto start = std::chrono::high_resolution_clock::now();
+    #endif
     auto res = skip_list_.Insert(static_cast<char*>(handle));
-
+    #ifdef TIMER
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+    std::cout << "SkipList_InsertKey: " << duration.count() << ", " << std::flush;
+    #endif
     return res;
   }
 
+
+
   void InsertWithHint(KeyHandle handle, void** hint) override {
+    // std::cout << "InsertWithHint called!" << std::endl;
     skip_list_.InsertWithHint(static_cast<char*>(handle), hint);
   }
 
@@ -229,9 +251,9 @@ class SkipListRep : public MemTableRep {
     // Retreat to the last entry with a key <= target
     void SeekForPrev(const Slice& user_key, const char* memtable_key) override {
       if (memtable_key != nullptr) {
-        iter_.SeekForPrev(memtable_key);
+      iter_.SeekForPrev(memtable_key);
       } else {
-        iter_.SeekForPrev(EncodeKey(&tmp_, user_key));
+      iter_.SeekForPrev(EncodeKey(&tmp_, user_key));
       }
     }
 

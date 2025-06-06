@@ -44,6 +44,9 @@
 #include "util/coding.h"
 #include "util/mutexlock.h"
 
+#include <chrono>
+#include <iostream>
+#define TIMER
 namespace ROCKSDB_NAMESPACE {
 
 ImmutableMemTableOptions::ImmutableMemTableOptions(
@@ -918,6 +921,9 @@ Status MemTable::Add(SequenceNumber s, ValueType type,
   //  value_size   : varint32 of value.size()
   //  value bytes  : char[value.size()]
   //  checksum     : char[moptions_.protection_bytes_per_key]
+  #ifdef TIMER
+  auto __start = std::chrono::high_resolution_clock::now();
+  #endif
   uint32_t key_size = static_cast<uint32_t>(key.size());
   uint32_t val_size = static_cast<uint32_t>(value.size());
   uint32_t internal_key_size = key_size + 8;
@@ -1078,6 +1084,12 @@ Status MemTable::Add(SequenceNumber s, ValueType type,
   UpdateOldestKeyTime();
 
   TEST_SYNC_POINT_CALLBACK("MemTable::Add:BeforeReturn:Encoded", &encoded);
+
+  #ifdef TIMER
+  auto __end = std::chrono::high_resolution_clock::now();
+  auto __duration = std::chrono::duration_cast<std::chrono::nanoseconds>(__end - __start);
+  std::cout << "MemTable:" << __duration.count() << ", " << std::flush;
+  #endif
   return Status::OK();
 }
 

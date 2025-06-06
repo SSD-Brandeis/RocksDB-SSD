@@ -10,6 +10,7 @@
 #include "memory/arena.h"
 
 #include <algorithm>
+#include <iostream>
 
 #include "logging/logging.h"
 #include "port/malloc.h"
@@ -35,6 +36,7 @@ size_t Arena::OptimizeBlockSize(size_t block_size) {
 
 Arena::Arena(size_t block_size, AllocTracker* tracker, size_t huge_page_size)
     : kBlockSize(OptimizeBlockSize(block_size)), tracker_(tracker) {
+  std::cout << "kBlockSize: " << kBlockSize << std::endl << std::flush;
   assert(kBlockSize >= kMinBlockSize && kBlockSize <= kMaxBlockSize &&
          kBlockSize % kAlignUnit == 0);
   TEST_SYNC_POINT_CALLBACK("Arena::Arena:0", const_cast<size_t*>(&kBlockSize));
@@ -49,6 +51,7 @@ Arena::Arena(size_t block_size, AllocTracker* tracker, size_t huge_page_size)
     }
   }
   if (tracker_ != nullptr) {
+    std::cout << "Calling tracker_" << std::endl << std::flush;
     tracker_->Allocate(kInlineSize);
   }
 }
