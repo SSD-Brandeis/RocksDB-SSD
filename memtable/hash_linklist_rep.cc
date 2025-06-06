@@ -20,6 +20,9 @@
 #include "rocksdb/utilities/options_type.h"
 #include "util/hash.h"
 
+#include <chrono>
+#include <iostream>
+#define TIMER
 namespace ROCKSDB_NAMESPACE {
 namespace {
 
@@ -596,9 +599,16 @@ void HashLinkListRep::Insert(KeyHandle handle) {
     // Case 1. empty bucket
     // NoBarrier_SetNext() suffices since we will add a barrier when
     // we publish a pointer to "x" in prev[i].
+    #ifdef TIMER
+    auto start = std::chrono::high_resolution_clock::now();
+    #endif
     x->NoBarrier_SetNext(nullptr);
     bucket.store(x, std::memory_order_release);
-
+    #ifdef TIMER
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+    std::cout << "HashLinkList_Insert_case_1_empty: " << duration.count() << ", " << std::flush;
+    #endif
     return;
   }
 
@@ -606,6 +616,9 @@ void HashLinkListRep::Insert(KeyHandle handle) {
   if (first_next_pointer->load(std::memory_order_relaxed) == nullptr) {
     // Case 2. only one entry in the bucket
     // Need to convert to a Counting bucket and turn to case 4.
+    #ifdef TIMER
+    auto start = std::chrono::high_resolution_clock::now();
+    #endif
     Node* first = reinterpret_cast<Node*>(first_next_pointer);
     // Need to add a bucket header.
     // We have to first convert it to a bucket with header before inserting
@@ -615,6 +628,11 @@ void HashLinkListRep::Insert(KeyHandle handle) {
     auto* mem = allocator_->AllocateAligned(sizeof(BucketHeader));
     header = new (mem) BucketHeader(first, 1);
     bucket.store(header, std::memory_order_release);
+    #ifdef TIMER
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+    std::cout << "HashLinkList_Insert_case_2_bucket_header: " << duration.count() << ", " << std::flush;
+    #endif
   } else {
     header = reinterpret_cast<BucketHeader*>(first_next_pointer);
     if (header->IsSkipListBucket()) {
@@ -665,6 +683,9 @@ void HashLinkListRep::Insert(KeyHandle handle) {
   } else {
     // Case 5. Need to insert to the sorted linked list without changing the
     // header.
+    #ifdef TIMER
+    auto start = std::chrono::high_resolution_clock::now();
+    #endif
     Node* first =
         reinterpret_cast<Node*>(header->next.load(std::memory_order_relaxed));
     assert(first != nullptr);
@@ -705,6 +726,11 @@ void HashLinkListRep::Insert(KeyHandle handle) {
     } else {
       header->next.store(static_cast<void*>(x), std::memory_order_release);
     }
+    #ifdef TIMER
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+    std::cout << "HashLinkList_Insert_case_5_linkedlist: " << duration.count() << ", " << std::flush;
+    #endif
   }
 
 }

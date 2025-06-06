@@ -17,6 +17,9 @@
 #include "rocksdb/utilities/options_type.h"
 #include "util/mutexlock.h"
 
+#include <chrono>
+#include <iostream>
+#define TIMER
 namespace ROCKSDB_NAMESPACE {
 namespace {
 
@@ -185,6 +188,9 @@ class UnsortedVectorRep : public VectorRep {
 
 
 void VectorRep::Insert(KeyHandle handle) {
+#ifdef TIMER
+  auto start = std::chrono::high_resolution_clock::now();
+#endif
   auto* key = static_cast<char*>(handle);
   {
     WriteLock l(&rwlock_);
@@ -192,15 +198,11 @@ void VectorRep::Insert(KeyHandle handle) {
     bucket_->push_back(key);
   }
   bucket_size_.FetchAddRelaxed(1);
-#ifdef PROFILE
-  auto end_time = std::chrono::high_resolution_clock::now();
-  std::cout << "InsertTime: "
-            << std::chrono::duration_cast<std::chrono::nanoseconds>(end_time -
-                                                                    start_time)
-                   .count()
-            << std::endl
-            << std::flush;
-#endif  // PROFILE
+#ifdef TIMER
+  auto stop = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+  std::cout << "VectorRep: " << duration.count() << ", " << std::flush;
+#endif
 }
 
 void VectorRep::InsertConcurrently(KeyHandle handle) {

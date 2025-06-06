@@ -164,7 +164,8 @@ class RateLimiter {
 //                      single call to `Request()`. Zero is a special value
 //                      meaning the number of bytes per refill.
 RateLimiter* NewGenericRateLimiter(
-    int64_t rate_bytes_per_sec, int64_t refill_period_us = 100 * 1000,
+  //100 * 1000 = 100ms   
+    int64_t rate_bytes_per_sec, int64_t refill_period_us = 10000 * 1000,
     int32_t fairness = 10,
     RateLimiter::Mode mode = RateLimiter::Mode::kWritesOnly,
     bool auto_tuned = false, int64_t single_burst_bytes = 0);

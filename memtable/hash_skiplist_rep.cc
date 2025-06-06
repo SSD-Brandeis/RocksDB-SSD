@@ -18,6 +18,10 @@
 #include "rocksdb/utilities/options_type.h"
 #include "util/murmurhash.h"
 
+
+#include <chrono>
+#include <iostream>
+#define TIMER
 namespace ROCKSDB_NAMESPACE {
 namespace {
 
@@ -266,6 +270,9 @@ HashSkipListRep::Bucket* HashSkipListRep::GetInitializedBucket(
 }
 
 void HashSkipListRep::Insert(KeyHandle handle) {
+  #ifdef TIMER
+  auto start = std::chrono::high_resolution_clock::now();
+  #endif
 
   auto* key = static_cast<char*>(handle);
   assert(!Contains(key));
@@ -273,6 +280,11 @@ void HashSkipListRep::Insert(KeyHandle handle) {
   auto bucket = GetInitializedBucket(transformed);
 
   bucket->Insert(key);
+  #ifdef TIMER
+  auto stop = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+  std::cout << "HashSkipList_Insert: " << duration.count() << ", " << std::flush;
+  #endif
 
 }
 

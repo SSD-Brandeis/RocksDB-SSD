@@ -35,6 +35,16 @@
 #include "rocksdb/version.h"
 #include "rocksdb/wide_columns.h"
 
+#include <chrono>
+#include <iostream>
+#define TIMER
+
+#if defined(__GNUC__) || defined(__clang__)
+#define ROCKSDB_DEPRECATED_FUNC __attribute__((__deprecated__))
+#elif _WIN32
+#define ROCKSDB_DEPRECATED_FUNC __declspec(deprecated)
+#endif
+
 namespace ROCKSDB_NAMESPACE {
 
 struct ColumnFamilyOptions;
@@ -511,7 +521,17 @@ class DB {
                      const Slice& ts, const Slice& value) = 0;
   virtual Status Put(const WriteOptions& options, const Slice& key,
                      const Slice& value) {
+    #ifdef TIMER
+    auto __inline_put1_start = std::chrono::high_resolution_clock::now();
+    #endif
     return Put(options, DefaultColumnFamily(), key, value);
+    #ifdef TIMER
+    auto __inline_put1_end = std::chrono::high_resolution_clock::now();
+    auto __inline_put1_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        __inline_put1_end - __inline_put1_start);
+    std::cout << "DB: "
+              << __inline_put1_ns.count() << std::endl << std::flush;
+    #endif
   }
   virtual Status Put(const WriteOptions& options, const Slice& key,
                      const Slice& ts, const Slice& value) {
