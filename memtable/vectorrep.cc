@@ -460,11 +460,19 @@ public:
   }
 
   void Insert(KeyHandle handle) override {
+  #ifdef TIMER
+  auto start = std::chrono::high_resolution_clock::now();
+  #endif
   auto* key = static_cast<char*>(handle);
   WriteLock l(&rwlock_);
   assert(!immutable_);
   auto position = std::lower_bound(bucket_->begin(), bucket_->end(), key);
   bucket_->insert(position, key);
+  #ifdef TIMER
+  auto stop = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+  std::cout << "AlwaysSortedVectorRep: " << duration.count() << ", " << std::flush;
+  #endif
   };
 
   void Get(const LookupKey &k, void *callback_args, bool(*callback_func)(void *arg, const char *entry)) override {
