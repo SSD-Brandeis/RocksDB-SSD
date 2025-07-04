@@ -17,6 +17,9 @@
 #include "rocksdb/utilities/options_type.h"
 #include "util/mutexlock.h"
 
+#include <chrono>
+#include <iostream>
+#define TIMER
 namespace ROCKSDB_NAMESPACE {
 namespace {
 
@@ -165,10 +168,19 @@ class UnsortedVectorRep : public VectorRep {
 
 
 void VectorRep::Insert(KeyHandle handle) {
+#ifdef TIMER
+  auto start = std::chrono::high_resolution_clock::now();
+#endif
   auto* key = static_cast<char*>(handle);
   WriteLock l(&rwlock_);
   assert(!immutable_);
   bucket_->push_back(key);
+
+#ifdef TIMER
+  auto stop = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+  std::cout << "VectorRep: " << duration.count() << ", " << std::flush;
+#endif
 }
 
 // Returns true iff an entry that compares equal to key is in the collection.
@@ -448,16 +460,28 @@ public:
   }
 
   void Insert(KeyHandle handle) override {
+#ifdef TIMER
+    auto start = std::chrono::high_resolution_clock::now();
+#endif
+
     auto* key = static_cast<char*>(handle);
     WriteLock l(&rwlock_);
     assert(!immutable_);
     const auto position = std::lower_bound(
       bucket_->begin(),
       bucket_->end(),
-      key, [this](const char *a, const char *b) {
+      key,
+      [this](const char* a, const char* b) {
         return compare_(a, b) < 0;
-      });
+      }
+    );
     bucket_->insert(position, key);
+
+#ifdef TIMER
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+    std::cout << "AlwaysSortedVectorRep: " << duration.count() << ", " << std::flush;
+#endif
   };
 
   void Get(const LookupKey &k, void *callback_args, bool (*callback_func)(void *arg, const char *entry)) override {

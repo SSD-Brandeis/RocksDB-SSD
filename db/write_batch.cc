@@ -72,6 +72,9 @@
 #include "util/duplicate_detector.h"
 #include "util/string_util.h"
 
+#include <chrono>
+#include <iostream>
+#define TIMER
 namespace ROCKSDB_NAMESPACE {
 
 // anon namespace for file-local types
@@ -521,6 +524,9 @@ Status WriteBatch::Iterate(Handler* handler) const {
 Status WriteBatchInternal::Iterate(const WriteBatch* wb,
                                    WriteBatch::Handler* handler, size_t begin,
                                    size_t end) {
+  #ifdef TIMER
+  auto __wb_iter_start = std::chrono::high_resolution_clock::now();
+  #endif
   if (begin > wb->rep_.size() || end > wb->rep_.size() || end < begin) {
     return Status::Corruption("Invalid start/end bounds for Iterate");
   }
@@ -764,6 +770,17 @@ Status WriteBatchInternal::Iterate(const WriteBatch* wb,
       found != WriteBatchInternal::Count(wb)) {
     return Status::Corruption("WriteBatch has wrong count");
   } else {
+  #ifdef TIMER
+  auto __wb_iter_end = std::chrono::high_resolution_clock::now();
+  auto __wb_iter_ns  =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          __wb_iter_end - __wb_iter_start);
+  std::cout << "WriteBatchInternal: " << __wb_iter_ns.count() << ", " << std::flush;
+  // std::cerr
+  //   << "WriteBatchInternal::Iterate("
+  //   << (whole_batch ? "full batch" : "sub-batch")
+  //   << ") took " << __wb_iter_ns.count() << " ns\n" << std::flush;
+  #endif
     return Status::OK();
   }
 }
@@ -2220,9 +2237,19 @@ class MemTableInserter : public WriteBatch::Handler {
       return rebuild_txn_op(rebuilding_trx_, column_family_id, key, value);
       // else insert the values to the memtable right away
     }
-
+  #ifdef TIMER
+  static size_t putcf_counter = 0;
+  putcf_counter++;
+  auto __pfc_start = std::chrono::high_resolution_clock::now();
+  #endif
     Status ret_status;
     if (UNLIKELY(!SeekToColumnFamily(column_family_id, &ret_status))) {
+      #ifdef TIMER
+      auto __pfc_mid = std::chrono::high_resolution_clock::now();
+      auto __pfc_early = std::chrono::duration_cast<std::chrono::nanoseconds>(
+          __pfc_mid - __pfc_start);
+      std::cout << "PutCFImpl: " << __pfc_early.count() << std::flush;
+      #endif
       if (ret_status.ok() && rebuilding_trx_ != nullptr) {
         assert(!write_after_commit_);
         // The CF is probably flushed and hence no need for insert but we still
@@ -2356,6 +2383,12 @@ class MemTableInserter : public WriteBatch::Handler {
       ret_status =
           rebuild_txn_op(rebuilding_trx_, column_family_id, key, value);
     }
+    #ifdef TIMER
+    auto __pfc_end = std::chrono::high_resolution_clock::now();
+    auto __pfc_full = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        __pfc_end - __pfc_start);
+    std::cout << "PutCFImpl: " << __pfc_full.count() << ", " << std::flush;
+    #endif
     return ret_status;
   }
 

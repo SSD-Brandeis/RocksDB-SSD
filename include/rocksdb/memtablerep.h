@@ -45,6 +45,9 @@
 #include "rocksdb/customizable.h"
 #include "rocksdb/slice.h"
 
+#include <chrono>
+#include <iostream>
+#define TIMER
 namespace ROCKSDB_NAMESPACE {
 
 class Arena;
@@ -102,7 +105,15 @@ class MemTableRep {
   // Returns false if MemTableRepFactory::CanHandleDuplicatedKey() is true and
   // the <key, seq> already exists.
   virtual bool InsertKey(KeyHandle handle) {
+  #ifdef TIMER
+  auto start = std::chrono::high_resolution_clock::now();
+  #endif
     Insert(handle);
+  #ifdef TIMER
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+    std::cout << "MemTableRep: " << duration.count() << ", " << std::flush;
+  #endif
     return true;
   }
 
