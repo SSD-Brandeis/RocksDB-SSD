@@ -454,13 +454,13 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
          disable_memtable);
 
 
-  #ifdef TIMER
-  auto __prewrite_end2 = std::chrono::high_resolution_clock::now();
-  std::cout << "packaging write request2 Time: "
-            << std::chrono::duration_cast<std::chrono::nanoseconds>(
-                  __prewrite_end2 - __writeimpl_start).count()
-            << "," << std::flush;
-  #endif
+  // #ifdef TIMER
+  // auto __prewrite_end2 = std::chrono::high_resolution_clock::now();
+  // std::cout << "packaging write request2 Time: "
+  //           << std::chrono::duration_cast<std::chrono::nanoseconds>(
+  //                 __prewrite_end2 - __writeimpl_start).count()
+  //           << "," << std::flush;
+  // #endif
 
   if (write_options.low_pri) {
     Status s = ThrottleLowPriWritesIfNeeded(write_options, my_batch);
@@ -469,13 +469,13 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
     }
   }
 
-  #ifdef TIMER
-  auto __prewrite_end1 = std::chrono::high_resolution_clock::now();
-  std::cout << "throttle low pri writes if needed: "
-            << std::chrono::duration_cast<std::chrono::nanoseconds>(
-                  __prewrite_end1 - __prewrite_end2).count()
-            << "," << std::flush;
-  #endif
+  // #ifdef TIMER
+  // auto __prewrite_end1 = std::chrono::high_resolution_clock::now();
+  // std::cout << "throttle low pri writes if needed: "
+  //           << std::chrono::duration_cast<std::chrono::nanoseconds>(
+  //                 __prewrite_end1 - __prewrite_end2).count()
+  //           << "," << std::flush;
+  // #endif
           
   if (two_write_queues_ && disable_memtable) {
     AssignOrder assign_order =
@@ -524,23 +524,23 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
                         log_ref, disable_memtable, batch_cnt,
                         pre_release_callback, post_memtable_callback,
                         /*_ingest_wbwi=*/wbwi != nullptr);
-  #ifdef TIMER
-  auto __prewrite_end = std::chrono::high_resolution_clock::now();
-  std::cout << "packaging write request2 Time: "
-            << std::chrono::duration_cast<std::chrono::nanoseconds>(
-                  __prewrite_end - __prewrite_end1).count()
-            << "," << std::flush;
-  #endif
+  // #ifdef TIMER
+  // auto __prewrite_end = std::chrono::high_resolution_clock::now();
+  // std::cout << "packaging write request2 Time: "
+  //           << std::chrono::duration_cast<std::chrono::nanoseconds>(
+  //                 __prewrite_end - __prewrite_end1).count()
+  //           << "," << std::flush;
+  // #endif
   StopWatch write_sw(immutable_db_options_.clock, stats_, DB_WRITE);
 
   write_thread_.JoinBatchGroup(&w);
-  #ifdef TIMER
-  auto __t2_end = std::chrono::high_resolution_clock::now();
-  std::cout << " JoinBatchGroup: "
-            << std::chrono::duration_cast<std::chrono::nanoseconds>(
-                   __t2_end - __prewrite_end).count()
-            << "," << std::flush;
-  #endif
+  // #ifdef TIMER
+  // auto __t2_end = std::chrono::high_resolution_clock::now();
+  // std::cout << " JoinBatchGroup: "
+  //           << std::chrono::duration_cast<std::chrono::nanoseconds>(
+  //                  __t2_end - __prewrite_end).count()
+  //           << "," << std::flush;
+  // #endif
   if (w.state == WriteThread::STATE_PARALLEL_MEMTABLE_CALLER) {
     write_thread_.SetMemWritersEachStride(&w);
   }
@@ -608,13 +608,13 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
   uint64_t last_sequence = kMaxSequenceNumber;
   
   PERF_TIMER_STOP(write_pre_and_post_process_time);
-  #ifdef TIMER
-  auto __t3_end = std::chrono::high_resolution_clock::now();
-  std::cout << "[T3-preprocess] PreprocessWrite: "
-            << std::chrono::duration_cast<std::chrono::nanoseconds>(
-                  __t3_end - __t2_end).count()
-            << "," << std::flush;
-  #endif
+  // #ifdef TIMER
+  // auto __t3_end = std::chrono::high_resolution_clock::now();
+  // std::cout << "[T3-preprocess] PreprocessWrite: "
+  //           << std::chrono::duration_cast<std::chrono::nanoseconds>(
+  //                 __t3_end - __t2_end).count()
+  //           << "," << std::flush;
+  // #endif
   assert(!two_write_queues_ || !disable_memtable);
   {
     // With concurrent writes we do preprocess only in the write thread that
@@ -872,13 +872,13 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
       }
     }
   }
-    #ifdef TIMER
-      auto __t5_end = std::chrono::high_resolution_clock::now();
-      std::cout << "write Internal InsertInto: "
-                << std::chrono::duration_cast<std::chrono::nanoseconds>(
-                      __t5_end - __t3_end).count()
-                << "," << std::flush;
-    #endif
+    // #ifdef TIMER
+    //   auto __t5_end = std::chrono::high_resolution_clock::now();
+    //   std::cout << "write Internal InsertInto: "
+    //             << std::chrono::duration_cast<std::chrono::nanoseconds>(
+    //                   __t5_end - __t3_end).count()
+    //             << "," << std::flush;
+    // #endif
   PERF_TIMER_START(write_pre_and_post_process_time);
 
   if (!io_s.ok()) {
@@ -944,13 +944,13 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
     }
     MemTableInsertStatusCheck(w.status);
     write_thread_.ExitAsBatchGroupLeader(write_group, status);
-    #ifdef TIMER
-      auto __t6_end = std::chrono::high_resolution_clock::now();
-      std::cout << " ExitAsBatchGroupLeader1: "
-                << std::chrono::duration_cast<std::chrono::nanoseconds>(
-                      __t6_end - __t5_end).count()
-                << "," << std::flush;
-      #endif
+    // #ifdef TIMER
+    //   auto __t6_end = std::chrono::high_resolution_clock::now();
+    //   std::cout << " ExitAsBatchGroupLeader1: "
+    //             << std::chrono::duration_cast<std::chrono::nanoseconds>(
+    //                   __t6_end - __t5_end).count()
+    //             << "," << std::flush;
+    //   #endif
   }
   
 
@@ -2349,10 +2349,10 @@ void DBImpl::WriteBufferManagerStallWrites() {
 
 Status DBImpl::ThrottleLowPriWritesIfNeeded(const WriteOptions& write_options,
                                             WriteBatch* my_batch) {
-  #ifdef TIMER
-  auto start = std::chrono::high_resolution_clock::now();
-  #endif
-  assert(write_options.low_pri);
+  // #ifdef TIMER
+  // auto start = std::chrono::high_resolution_clock::now();
+  // #endif
+  // assert(write_options.low_pri);
   // This is called outside the DB mutex. Although it is safe to make the call,
   // the consistency condition is not guaranteed to hold. It's OK to live with
   // it in this case.
@@ -2363,23 +2363,23 @@ Status DBImpl::ThrottleLowPriWritesIfNeeded(const WriteOptions& write_options,
       // For 2PC, we only rate limit prepare, not commit.
       return Status::OK();
     }
-  #ifdef TIMER
-  auto end1 = std::chrono::high_resolution_clock::now();
-  std::cout << "END1: "
-            << std::chrono::duration_cast<std::chrono::nanoseconds>(
-                  end1 - start).count()
-            << "," << std::flush;
-  #endif
+  // #ifdef TIMER
+  // auto end1 = std::chrono::high_resolution_clock::now();
+  // std::cout << "END1: "
+  //           << std::chrono::duration_cast<std::chrono::nanoseconds>(
+  //                 end1 - start).count()
+  //           << "," << std::flush;
+  // #endif
     if (write_options.no_slowdown) {
       return Status::Incomplete("Low priority write stall");
     } else {
-  #ifdef TIMER
-  auto end2 = std::chrono::high_resolution_clock::now();
-  std::cout << "END2: "
-            << std::chrono::duration_cast<std::chrono::nanoseconds>(
-                  end2 - end1).count()
-            << "," << std::flush;
-  #endif
+  // #ifdef TIMER
+  // auto end2 = std::chrono::high_resolution_clock::now();
+  // std::cout << "END2: "
+  //           << std::chrono::duration_cast<std::chrono::nanoseconds>(
+  //                 end2 - end1).count()
+  //           << "," << std::flush;
+  // #endif
       assert(my_batch != nullptr);
       // Rate limit those writes. The reason that we don't completely wait
       // is that in case the write is heavy, low pri writes may never have
@@ -2393,13 +2393,13 @@ Status DBImpl::ThrottleLowPriWritesIfNeeded(const WriteOptions& write_options,
             RateLimiter::OpType::kWrite);
         data_size -= allowed;
       }
-  #ifdef TIMER
-  auto end3 = std::chrono::high_resolution_clock::now();
-  std::cout << "END3: "
-            << std::chrono::duration_cast<std::chrono::nanoseconds>(
-                  end3 - end2).count()
-            << "," << std::flush;
-  #endif
+  // #ifdef TIMER
+  // auto end3 = std::chrono::high_resolution_clock::now();
+  // std::cout << "END3: "
+  //           << std::chrono::duration_cast<std::chrono::nanoseconds>(
+  //                 end3 - end2).count()
+  //           << "," << std::flush;
+  // #endif
     }
   }
   return Status::OK();
