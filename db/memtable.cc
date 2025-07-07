@@ -1088,7 +1088,7 @@ Status MemTable::Add(SequenceNumber s, ValueType type,
   #ifdef TIMER
   auto __end = std::chrono::high_resolution_clock::now();
   auto __duration = std::chrono::duration_cast<std::chrono::nanoseconds>(__end - __start);
-  std::cout << "MemTable:" << __duration.count() << ", " << std::flush;
+  std::cout << "MemTable: " << __duration.count() << ", " << std::flush;
   #endif
   return Status::OK();
 }

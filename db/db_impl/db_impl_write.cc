@@ -1562,7 +1562,7 @@ Status DBImpl::PreprocessWrite(const WriteOptions& write_options,
     auto __sched_flush_end = std::chrono::high_resolution_clock::now();
     auto __sched_flush_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
         __sched_flush_end - __sched_flush_start);
-    std::cout << "ScheduleFlushes took "
+    std::cout << "ScheduleFlushes: "
               << __sched_flush_ns.count() << "," << std::flush;
     #endif
   }
@@ -2837,9 +2837,9 @@ size_t DBImpl::GetWalPreallocateBlockSize(uint64_t write_buffer_size) const {
   auto __gw_pre_ns  =
       std::chrono::duration_cast<std::chrono::nanoseconds>(
           __gw_pre_end - __gw_pre_start);
-  std::cerr
-      << "GetWalPreallocateBlockSize: "
-      << __gw_pre_ns.count() << ", " << std::flush;
+  // std::cerr
+  //     << "GetWalPreallocateBlockSize: "
+  //     << __gw_pre_ns.count() << ", " << std::endl;
   #endif
 
   return bsize;

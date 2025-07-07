@@ -36,7 +36,7 @@ size_t Arena::OptimizeBlockSize(size_t block_size) {
 
 Arena::Arena(size_t block_size, AllocTracker* tracker, size_t huge_page_size)
     : kBlockSize(OptimizeBlockSize(block_size)), tracker_(tracker) {
-  std::cout << "kBlockSize: " << kBlockSize << std::endl << std::flush;
+  // std::cout << "kBlockSize: " << kBlockSize << std::endl << std::flush;
   assert(kBlockSize >= kMinBlockSize && kBlockSize <= kMaxBlockSize &&
          kBlockSize % kAlignUnit == 0);
   TEST_SYNC_POINT_CALLBACK("Arena::Arena:0", const_cast<size_t*>(&kBlockSize));
