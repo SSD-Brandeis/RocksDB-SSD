@@ -173,12 +173,18 @@ void VectorRep::Insert(KeyHandle handle) {
 #endif
   auto* key = static_cast<char*>(handle);
   WriteLock l(&rwlock_);
+#ifdef TIMER
+  auto stop1 = std::chrono::high_resolution_clock::now();
+  auto duration1 = std::chrono::duration_cast<std::chrono::nanoseconds>(stop1 - start);
+  std::cout << "Lock: " << duration1.count() << ", " << std::flush;
+#endif
+  
   assert(!immutable_);
   bucket_->push_back(key);
 
 #ifdef TIMER
   auto stop = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+  auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - stop1);
   std::cout << "VectorRep: " << duration.count() << ", " << std::flush;
 #endif
 }
