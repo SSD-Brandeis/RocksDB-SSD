@@ -20,7 +20,6 @@
 
 #include <chrono>
 #include <iostream>
-#define TIMER
 namespace ROCKSDB_NAMESPACE {
 // Convenience methods
 Status DBImpl::Put(const WriteOptions& o, ColumnFamilyHandle* column_family,
@@ -324,7 +323,6 @@ Status DBImpl::IngestWBWI(std::shared_ptr<WriteBatchWithIndex> wbwi,
                            &flush_req);
       EnqueuePendingFlush(flush_req);
     }
-    std::cout << "MaybeScheduleFlushOrCompaction called" << std::endl;
 
     MaybeScheduleFlushOrCompaction();
     
@@ -1556,7 +1554,6 @@ Status DBImpl::PreprocessWrite(const WriteOptions& write_options,
     #endif
     InstrumentedMutexLock l(&mutex_);
     WaitForPendingWrites();
-    std::cout << "flush_scheduler not empty\n" << std::flush;
     status = ScheduleFlushes(write_context);
     #ifdef TIMER
     auto __sched_flush_end = std::chrono::high_resolution_clock::now();
@@ -2112,7 +2109,6 @@ Status DBImpl::SwitchWAL(WriteContext* write_context) {
       GenerateFlushRequest(cfds, FlushReason::kWalFull, &flush_req);
       EnqueuePendingFlush(flush_req);
     }
-    std::cout << "MaybeScheduleFlushOrCompaction called" << std::endl;
     MaybeScheduleFlushOrCompaction();
   }
   return status;
@@ -2205,7 +2201,6 @@ Status DBImpl::HandleWriteBufferManagerFlush(WriteContext* write_context) {
       GenerateFlushRequest(cfds, FlushReason::kWriteBufferManager, &flush_req);
       EnqueuePendingFlush(flush_req);
     }
-    std::cout << "MaybeScheduleFlushOrCompaction called" << std::endl;
     MaybeScheduleFlushOrCompaction();
   }
   return status;
@@ -2464,7 +2459,6 @@ Status DBImpl::TrimMemtableHistory(WriteContext* context) {
 }
 
 Status DBImpl::ScheduleFlushes(WriteContext* context) {
-  std::cout << "Entered ScheduleFlushes()" << std::endl;
   autovector<ColumnFamilyData*> cfds;
   if (immutable_db_options_.atomic_flush) {
     SelectColumnFamiliesForAtomicFlush(&cfds);
@@ -2479,12 +2473,6 @@ Status DBImpl::ScheduleFlushes(WriteContext* context) {
     }
     MaybeFlushStatsCF(&cfds);
   }
-  //debug code for spike
-  size_t total_imm = 0;
-  for (auto* cfd : cfds) {
-    total_imm += cfd->imm()->NumNotFlushed();
-  }
-  std::cout << "Total imm memtables: " << total_imm << std::endl;
 
   //debug code end for spike
   Status status;
@@ -2497,10 +2485,6 @@ Status DBImpl::ScheduleFlushes(WriteContext* context) {
                            nullptr);
   for (auto& cfd : cfds) {
     if (status.ok() && !cfd->mem()->IsEmpty()) {
-      std::cout << "[FLUSH] CF=" << cfd->GetName()
-          << ", ImmTables=" << cfd->imm()->NumNotFlushed()
-          << ", MemSize=" << cfd->mem()->ApproximateMemoryUsage()
-          << " bytes" << std::endl;
       status = SwitchMemtable(cfd, context);
     }
     if (cfd->UnrefAndTryDelete()) {
@@ -2525,7 +2509,6 @@ Status DBImpl::ScheduleFlushes(WriteContext* context) {
         EnqueuePendingFlush(flush_req);
       }
     }
-    std::cout << "MaybeScheduleFlushOrCompaction called" << std::endl;
     MaybeScheduleFlushOrCompaction();
   }
   return status;

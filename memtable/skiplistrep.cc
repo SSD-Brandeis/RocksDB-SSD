@@ -16,7 +16,6 @@
 
 #include <chrono>
 #include <iostream>
-#define TIMER
 namespace ROCKSDB_NAMESPACE {
 namespace {
 class SkipListRep : public MemTableRep {

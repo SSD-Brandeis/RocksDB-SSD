@@ -14,6 +14,7 @@
 // non-const method, all threads accessing the same Status must use
 // external synchronization.
 
+
 #pragma once
 
 #ifdef ROCKSDB_ASSERT_STATUS_CHECKED

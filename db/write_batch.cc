@@ -74,7 +74,6 @@
 
 #include <chrono>
 #include <iostream>
-#define TIMER
 namespace ROCKSDB_NAMESPACE {
 
 // anon namespace for file-local types

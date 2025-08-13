@@ -19,7 +19,6 @@
 
 #include <chrono>
 #include <iostream>
-#define TIMER
 namespace ROCKSDB_NAMESPACE {
 namespace {
 
