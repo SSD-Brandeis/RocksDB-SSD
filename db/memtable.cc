@@ -46,7 +46,7 @@
 
 #include <chrono>
 #include <iostream>
-#define TIMER
+// #define TIMER
 namespace ROCKSDB_NAMESPACE {
 
 ImmutableMemTableOptions::ImmutableMemTableOptions(

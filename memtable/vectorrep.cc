@@ -19,7 +19,7 @@
 
 #include <chrono>
 #include <iostream>
-#define TIMER
+// #define TIMER
 namespace ROCKSDB_NAMESPACE {
 namespace {
 
@@ -236,12 +236,15 @@ void VectorRep::Iterator::DoSort() const {
       vrep_->sorted_ = true;
     }
     sorted_ = true;
+
+    std::cout<<__LINE__<<"sort happen"<<std::endl<<std::flush;
   }
   if (!sorted_) {
     std::sort(bucket_->begin(), bucket_->end(),
               stl_wrappers::Compare(compare_));
     cit_ = bucket_->begin();
     sorted_ = true;
+    std::cout<<__LINE__<<"(empty) sort happen"<<std::endl<<std::flush;
   }
   assert(sorted_);
   assert(vrep_ == nullptr || vrep_->sorted_);
