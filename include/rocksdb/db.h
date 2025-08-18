@@ -37,7 +37,7 @@
 
 #include <chrono>
 #include <iostream>
-#define TIMER
+// #define TIMER
 
 #if defined(__GNUC__) || defined(__clang__)
 #define ROCKSDB_DEPRECATED_FUNC __attribute__((__deprecated__))
