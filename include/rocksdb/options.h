@@ -66,6 +66,14 @@ using FileTypeSet = SmallEnumSet<FileType, FileType::kBlobFile>;
 using CompactionStyleSet =
     SmallEnumSet<CompactionStyle, CompactionStyle::kCompactionStyleNone>;
 
+enum Verbosity {
+  NO_PRINTS = 0,
+  LOW = 1,
+  MEDIUM = 2,
+  HIGH = 3,
+  EXTREME = 4,
+};
+
 struct ColumnFamilyOptions : public AdvancedColumnFamilyOptions {
   // The function recovers options to a previous version. Only 4.6 or later
   // versions are supported.
@@ -1620,6 +1628,9 @@ struct DBOptions {
   std::string daily_offpeak_time_utc = "";
 
   // EXPERIMENTAL
+
+  // Setting the verbosity of print statements
+  Verbosity verbosity = Verbosity::NO_PRINTS;
 
   // When a RocksDB database is opened in follower mode, this option
   // is set by the user to request the frequency of the follower

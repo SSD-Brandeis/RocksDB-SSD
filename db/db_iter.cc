@@ -11,6 +11,7 @@
 
 #include <limits>
 #include <string>
+#include <iostream>
 
 #include "db/dbformat.h"
 #include "db/merge_context.h"
@@ -402,6 +403,7 @@ bool DBIter::FindNextUserEntryInternal(bool skipping_saved_key,
       is_key_seqnum_zero_ = false;
       return false;
     }
+    ++entries_read_in_total_;
     Slice user_key_without_ts =
         StripTimestampFromUserKey(ikey_.user_key, timestamp_size_);
 
@@ -449,6 +451,7 @@ bool DBIter::FindNextUserEntryInternal(bool skipping_saved_key,
           skipping_saved_key &&
           CompareKeyForSkip(ikey_.user_key, saved_key_.GetUserKey()) <= 0) {
         num_skipped++;  // skip this entry
+        ++entries_skipped_;
         PERF_COUNTER_ADD(internal_key_skipped_count, 1);
         MarkMemtableForFlushForPerOpTrigger(mem_hidden_op_scanned);
       } else {
@@ -470,6 +473,7 @@ bool DBIter::FindNextUserEntryInternal(bool skipping_saved_key,
               saved_key_.SetUserKey(
                   ikey_.user_key, !pin_thru_lifetime_ ||
                                       !iter_.iter()->IsKeyPinned() /* copy */);
+              ++entries_skipped_;
               skipping_saved_key = true;
               PERF_COUNTER_ADD(internal_delete_skipped_count, 1);
               MarkMemtableForFlushForPerOpTrigger(mem_hidden_op_scanned);
@@ -541,6 +545,7 @@ bool DBIter::FindNextUserEntryInternal(bool skipping_saved_key,
       int cmp = user_comparator_.CompareWithoutTimestamp(
           ikey_.user_key, saved_key_.GetUserKey());
       if (cmp == 0 || (skipping_saved_key && cmp < 0)) {
+        ++entries_skipped_;
         num_skipped++;
       } else {
         saved_key_.SetUserKey(
@@ -562,6 +567,7 @@ bool DBIter::FindNextUserEntryInternal(bool skipping_saved_key,
     // then it does not make sense to reseek as we would actually land further
     // away from the desired key. There is opportunity for optimization here.
     if (num_skipped > max_skip_ && !reseek_done) {
+      std::cout << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__ << ": max_skip_ reached i.e.:" << num_skipped << std::endl;
       is_key_seqnum_zero_ = false;
       num_skipped = 0;
       reseek_done = true;

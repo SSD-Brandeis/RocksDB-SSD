@@ -110,6 +110,10 @@ class Iterator : public IteratorBase {
   // If Prepare() is called, it overrides the iterate_upper_bound in
   // ReadOptions
   virtual void Prepare(const MultiScanArgs& /*scan_opts*/) {}
+
+  bool is_rq_iter = 0;
+  int entries_skipped_ = 0;
+  int entries_read_in_total_ = 0;
 };
 
 // Return an empty iterator (yields nothing).
