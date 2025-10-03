@@ -19,6 +19,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <iostream>
 
 #include "db/blob/blob_fetcher.h"
 #include "db/blob/blob_file_cache.h"
@@ -3435,9 +3436,11 @@ void VersionStorageInfo::ComputeCompactionScore(
   // if it is larger than 1.0.
   const double kScoreScale = 10.0;
   int max_output_level = MaxOutputLevel(immutable_options.allow_ingest_behind);
+  int flex_level_ = mutable_cf_options.flex_level;
+  std::cout<<"flex_count is " << flex_level_ << std::endl;
   for (int level = 0; level <= MaxInputLevel(); level++) {
     double score;
-    if (level == 0) {
+    if (level <= flex_level_) { // "== 0 to <= flex_level_"
       // We treat level-0 specially by bounding the number of files
       // instead of number of bytes for two reasons:
       //

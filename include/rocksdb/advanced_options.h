@@ -1094,6 +1094,9 @@ struct AdvancedColumnFamilyOptions {
   // additional key comparison during memtable lookup.
   bool paranoid_memory_checks = false;
 
+  
+  int flex_level;
+
   // Create ColumnFamilyOptions with default values for all fields
   AdvancedColumnFamilyOptions();
   // Create ColumnFamilyOptions from Options
