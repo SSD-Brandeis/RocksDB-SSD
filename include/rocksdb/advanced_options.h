@@ -1094,7 +1094,7 @@ struct AdvancedColumnFamilyOptions {
   // additional key comparison during memtable lookup.
   bool paranoid_memory_checks = false;
 
-  
+  // Tree will follow tiered layout up until level i
   int ilevel;
 
   // Create ColumnFamilyOptions with default values for all fields
