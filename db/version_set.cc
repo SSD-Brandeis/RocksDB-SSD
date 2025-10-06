@@ -3437,7 +3437,6 @@ void VersionStorageInfo::ComputeCompactionScore(
   const double kScoreScale = 10.0;
   int max_output_level = MaxOutputLevel(immutable_options.allow_ingest_behind);
   int flex_level_ = mutable_cf_options.flex_level;
-  std::cout<<"flex_count is " << flex_level_ << std::endl;
   for (int level = 0; level <= MaxInputLevel(); level++) {
     double score;
     if (level <= flex_level_) { // "== 0 to <= flex_level_"
