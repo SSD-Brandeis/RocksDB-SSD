@@ -174,7 +174,7 @@ struct MutableCFOptions {
         bottommost_file_compaction_delay(
             options.bottommost_file_compaction_delay),
         uncache_aggressiveness(options.uncache_aggressiveness),
-        flex_level(options.flex_level) {
+        ilevel(options.ilevel) {
     RefreshDerivedOptions(options.num_levels, options.compaction_style);
   }
 
@@ -230,7 +230,7 @@ struct MutableCFOptions {
         memtable_max_range_deletions(0),
         bottommost_file_compaction_delay(0),
         uncache_aggressiveness(0),
-        flex_level(0) {}
+        ilevel(0) {}
 
   explicit MutableCFOptions(const Options& options);
 
@@ -339,7 +339,7 @@ struct MutableCFOptions {
   uint32_t bottommost_file_compaction_delay;
   uint32_t uncache_aggressiveness;
 
-  int flex_level;
+  int ilevel;
   // Derived options
   // Per-level target file size.
   std::vector<uint64_t> max_file_size;

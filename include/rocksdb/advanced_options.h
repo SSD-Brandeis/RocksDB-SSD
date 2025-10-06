@@ -1095,7 +1095,7 @@ struct AdvancedColumnFamilyOptions {
   bool paranoid_memory_checks = false;
 
   
-  int flex_level;
+  int ilevel;
 
   // Create ColumnFamilyOptions with default values for all fields
   AdvancedColumnFamilyOptions();

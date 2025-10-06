@@ -162,7 +162,7 @@ class LevelCompactionBuilder {
                             int level);
 
   static const int kMinFilesForIntraL0Compaction = 4;
-  int flex_level_ = mutable_cf_options_.flex_level;
+  int ilevel = mutable_cf_options_.ilevel;
 };
 
 void LevelCompactionBuilder::PickFileToCompact(
@@ -221,7 +221,7 @@ void LevelCompactionBuilder::SetupInitialFiles() {
                                &picked_file_to_compact);
       if (picked_file_to_compact) {
         // found the compaction!
-        if (start_level_ <= flex_level_) {// "from == 0 to <= flex_level_"
+        if (start_level_ <= ilevel) {// "from == 0 to <= ilevel"
           // L0 score = `num L0 files` / `level0_file_num_compaction_trigger`
           compaction_reason_ = CompactionReason::kLevelL0FilesNum;
         } else {
@@ -462,7 +462,7 @@ bool LevelCompactionBuilder::SetupOtherInputsIfNeeded() {
   // Setup input files from output level. For output to L0, we only compact
   // spans of files that do not interact with any pending compactions, so don't
   // need to consider other levels.
-  if (output_level_ > flex_level_) { //change from != 0 to > flex_level_
+  if (output_level_ > ilevel) { //change from != 0 to > ilevel
     output_level_inputs_.level = output_level_;
     bool round_robin_expanding =
         ioptions_.compaction_pri == kRoundRobin &&
@@ -546,8 +546,8 @@ Compaction* LevelCompactionBuilder::GetCompaction() {
   // pull in more L0s.
   assert(!compaction_inputs_.empty());
   bool l0_files_might_overlap =
-      start_level_ <= flex_level_ && !is_l0_trivial_move_ &&
-      (compaction_inputs_.size() > 1 || compaction_inputs_[0].size() > 1); //try: change "start_level_ == 0 to <= flex_level_"
+      start_level_ <= ilevel && !is_l0_trivial_move_ &&
+      (compaction_inputs_.size() > 1 || compaction_inputs_[0].size() > 1); //try: change "start_level_ == 0 to <= ilevel"
   auto c = new Compaction(
       vstorage_, ioptions_, mutable_cf_options_, mutable_db_options_,
       std::move(compaction_inputs_), output_level_,

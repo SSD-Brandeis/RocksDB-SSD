@@ -3436,10 +3436,10 @@ void VersionStorageInfo::ComputeCompactionScore(
   // if it is larger than 1.0.
   const double kScoreScale = 10.0;
   int max_output_level = MaxOutputLevel(immutable_options.allow_ingest_behind);
-  int flex_level_ = mutable_cf_options.flex_level;
+  int ilevel = mutable_cf_options.ilevel;
   for (int level = 0; level <= MaxInputLevel(); level++) {
     double score;
-    if (level <= flex_level_) { // "== 0 to <= flex_level_"
+    if (level <= ilevel) { // "== 0 to <= ilevel"
       // We treat level-0 specially by bounding the number of files
       // instead of number of bytes for two reasons:
       //
