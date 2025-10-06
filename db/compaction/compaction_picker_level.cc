@@ -546,8 +546,8 @@ Compaction* LevelCompactionBuilder::GetCompaction() {
   // pull in more L0s.
   assert(!compaction_inputs_.empty());
   bool l0_files_might_overlap =
-      start_level_ == 0 && !is_l0_trivial_move_ &&
-      (compaction_inputs_.size() > 1 || compaction_inputs_[0].size() > 1);
+      start_level_ <= flex_level_ && !is_l0_trivial_move_ &&
+      (compaction_inputs_.size() > 1 || compaction_inputs_[0].size() > 1); //try: change "start_level_ == 0 to <= flex_level_"
   auto c = new Compaction(
       vstorage_, ioptions_, mutable_cf_options_, mutable_db_options_,
       std::move(compaction_inputs_), output_level_,
