@@ -625,6 +625,7 @@ class Compaction {
   InternalKey penultimate_level_largest_;
   PenultimateOutputRangeType penultimate_output_range_type_ =
       PenultimateOutputRangeType::kNotSupported;
+  bool dynamic_file_size;
 };
 
 #ifndef NDEBUG

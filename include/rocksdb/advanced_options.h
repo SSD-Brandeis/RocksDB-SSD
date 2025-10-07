@@ -1097,6 +1097,8 @@ struct AdvancedColumnFamilyOptions {
   // Tree will follow tiered layout up until level i
   int ilevel;
 
+  bool dynamic_file_size;
+
   // Create ColumnFamilyOptions with default values for all fields
   AdvancedColumnFamilyOptions();
   // Create ColumnFamilyOptions from Options

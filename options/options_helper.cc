@@ -300,6 +300,7 @@ void UpdateColumnFamilyOptions(const MutableCFOptions& moptions,
   cf_opts->memtable_max_range_deletions = moptions.memtable_max_range_deletions;
   cf_opts->uncache_aggressiveness = moptions.uncache_aggressiveness;
   cf_opts->ilevel = moptions.ilevel;
+  cf_opts->dynamic_file_size = moptions.dynamic_file_size;
 }
 
 void UpdateColumnFamilyOptions(const ImmutableCFOptions& ioptions,

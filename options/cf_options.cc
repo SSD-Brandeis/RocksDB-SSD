@@ -1177,6 +1177,8 @@ void MutableCFOptions::Dump(Logger* log) const {
                  uncache_aggressiveness);
   ROCKS_LOG_INFO(log, "                   flex_levels: %" PRIu32,
                  ilevel);
+  ROCKS_LOG_INFO(log, "                   dynamic_file_size: %" PRIu32,
+                 dynamic_file_size);
 
   // Universal Compaction Options
   ROCKS_LOG_INFO(log, "compaction_options_universal.size_ratio : %d",

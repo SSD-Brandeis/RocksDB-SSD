@@ -347,7 +347,8 @@ Compaction::Compaction(
               ? Compaction::kInvalidLevel
               : EvaluatePenultimateLevel(vstorage, mutable_cf_options_,
                                          immutable_options_, start_level_,
-                                         output_level_)) {
+                                         output_level_)),
+      dynamic_file_size(mutable_cf_options_.dynamic_file_size){
   MarkFilesBeingCompacted(true);
   if (is_manual_compaction_) {
     compaction_reason_ = CompactionReason::kManualCompaction;
@@ -358,9 +359,9 @@ Compaction::Compaction(
 
   // for the non-bottommost levels, it tries to build files match the target
   // file size, but not guaranteed. It could be 2x the size of the target size.
-  max_output_file_size_ = bottommost_level_ || grandparents_.empty()
-                              ? target_output_file_size_
-                              : 2 * target_output_file_size_;
+  max_output_file_size_ = dynamic_file_size && !(bottommost_level_ || grandparents_.empty())
+                              ? 2 * target_output_file_size_
+                              : target_output_file_size_;
 
 #ifndef NDEBUG
   for (size_t i = 1; i < inputs_.size(); ++i) {
