@@ -159,6 +159,8 @@ enum class CompactionReason : int {
   kRefitLevel,
   // total number of compaction reasons, new reasons must be added above this.
   kNumOfReasons,
+  // [ILevel] number of Li files > level0_file_num_compaction_trigger
+  kLevelLiFilesNum,
 };
 
 const char* GetCompactionReasonString(CompactionReason compaction_reason);
