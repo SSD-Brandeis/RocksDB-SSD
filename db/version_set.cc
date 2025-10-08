@@ -3436,10 +3436,9 @@ void VersionStorageInfo::ComputeCompactionScore(
   // if it is larger than 1.0.
   const double kScoreScale = 10.0;
   int max_output_level = MaxOutputLevel(immutable_options.allow_ingest_behind);
-  int ilevel = mutable_cf_options.ilevel;
   for (int level = 0; level <= MaxInputLevel(); level++) {
     double score;
-    if (level <= ilevel) { // "== 0 to <= ilevel"
+    if (level <= mutable_cf_options.ilevel) {
       // We treat level-0 specially by bounding the number of files
       // instead of number of bytes for two reasons:
       //
@@ -3548,7 +3547,7 @@ void VersionStorageInfo::ComputeCompactionScore(
           } else {
             score = std::max(score,
                              static_cast<double>(total_size) /
-                                 mutable_cf_options.max_bytes_for_level_base);
+                                 MaxBytesForLevel(level + 1));
           }
         }
       }
