@@ -222,14 +222,8 @@ class CompactionPicker {
   void UnregisterCompaction(Compaction* c);
 
   std::set<Compaction*>* ilevel_compactions_in_progress(int level) {
-    // FIXME: (Steven) Implement the compactions tracker for each level
-    //
-    //        Like we track compactions for level 0 using function
-    //        level0_compactions_in_progress(), we also want to track
-    //        compactions for each level upto i
-    //
-    //        IN FUTURE
-    //        `i` can be dynamic based on FluidLSM ML model
+    // IN FUTURE
+    //     `i` can be dynamic based on FluidLSM ML model
     return &leveli_compactions_in_progress_[level];
   }
 
@@ -255,6 +249,9 @@ class CompactionPicker {
   // Protected by DB mutex
   std::set<Compaction*> level0_compactions_in_progress_;
 
+  // FIXME (shubham): since we are tracking all the compaction in
+  // `leveli_compaction_in_progress_`, we can get rid of 
+  // `compaction_in_progress` as it is doing the same
   std::vector<std::set<Compaction*>> leveli_compactions_in_progress_;
 
   // Keeps track of all compactions that are running.

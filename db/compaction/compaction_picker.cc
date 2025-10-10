@@ -128,7 +128,9 @@ CompressionOptions GetCompressionOptions(const MutableCFOptions& cf_options,
 
 CompactionPicker::CompactionPicker(const ImmutableOptions& ioptions,
                                    const InternalKeyComparator* icmp)
-    : ioptions_(ioptions), icmp_(icmp) {leveli_compactions_in_progress_.resize(ioptions.num_levels);}
+    : ioptions_(ioptions), icmp_(icmp) {
+  leveli_compactions_in_progress_.resize(ioptions.num_levels);
+}
 
 CompactionPicker::~CompactionPicker() = default;
 
