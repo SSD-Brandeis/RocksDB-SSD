@@ -1177,6 +1177,7 @@ void CompactionPicker::UnregisterCompaction(Compaction* c) {
       ioptions_.compaction_style == kCompactionStyleUniversal) {
     level0_compactions_in_progress_.erase(c);
   }
+  leveli_compactions_in_progress_[c->start_level()].erase(c);
   compactions_in_progress_.erase(c);
 }
 
