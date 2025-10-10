@@ -230,7 +230,7 @@ class CompactionPicker {
     //
     //        IN FUTURE
     //        `i` can be dynamic based on FluidLSM ML model
-    return nullptr;
+    return &leveli_compactions_in_progress_[level];
   }
 
   std::set<Compaction*>* level0_compactions_in_progress() {
@@ -254,6 +254,8 @@ class CompactionPicker {
   // Keeps track of all compactions that are running on Level0.
   // Protected by DB mutex
   std::set<Compaction*> level0_compactions_in_progress_;
+
+  std::vector<std::set<Compaction*>> leveli_compactions_in_progress_;
 
   // Keeps track of all compactions that are running.
   // Protected by DB mutex
