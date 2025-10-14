@@ -19,7 +19,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <iostream>
 
 #include "db/blob/blob_fetcher.h"
 #include "db/blob/blob_file_cache.h"
@@ -2163,7 +2162,8 @@ VersionStorageInfo::VersionStorageInfo(
       file_indexer_(user_comparator),
       compaction_style_(compaction_style),
       files_(new std::vector<FileMetaData*>[num_levels_]),
-      sorted_runs_per_level_(new std::vector<std::vector<FileMetaData*>>[num_levels_]),
+      sorted_runs_per_level_(
+          new std::vector<std::vector<FileMetaData*>>[num_levels_]),
       base_level_(num_levels_ == 1 ? -1 : 1),
       lowest_unnecessary_level_(-1),
       level_multiplier_(0.0),
@@ -3509,7 +3509,11 @@ void VersionStorageInfo::ComputeCompactionScore(
         // if there is any compaction work to do.
         score = static_cast<double>(num_sorted_runs) /
                 mutable_cf_options.level0_file_num_compaction_trigger;
-        if (compaction_style_ == kCompactionStyleLevel && num_levels() > 1) {
+        if (compaction_style_ == kCompactionStyleiLevel) {
+          score = static_cast<double>(sorted_runs_per_level_[level].size()) /
+                  mutable_cf_options.level0_file_num_compaction_trigger;
+        }
+        else if (compaction_style_ == kCompactionStyleLevel && num_levels() > 1) {
           // Level-based involves L0->L0 compactions that can lead to oversized
           // L0 files. Take into account size as well to avoid later giant
           // compactions to the base level.
@@ -3549,9 +3553,8 @@ void VersionStorageInfo::ComputeCompactionScore(
               score *= kScoreScale;
             }
           } else {
-            score = std::max(score,
-                             static_cast<double>(total_size) /
-                                 MaxBytesForLevel(level + 1));
+            score = std::max(score, static_cast<double>(total_size) /
+                                        MaxBytesForLevel(level + 1));
           }
         }
       }
@@ -4572,22 +4575,25 @@ const char* VersionStorageInfo::LevelSummary(
 }
 
 const char* VersionStorageInfo::RunsPerLevelSummary(
-  LevelSummaryStorage* scratch) const {
+    LevelSummaryStorage* scratch) const {
   int len = 0;
-  // FIXME: (shubham) kCompactionStyleLevel can be changed to kCompactionStyleiLevel
+  // FIXME: (shubham) kCompactionStyleLevel can be changed to
+  // kCompactionStyleiLevel
   if (compaction_style_ == kCompactionStyleLevel && num_levels() > 1) {
     assert(base_level_ < static_cast<int>(level_max_bytes_.size()));
     if (level_multiplier_ != 0.0) {
       len = snprintf(
-        scratch->buffer, sizeof(scratch->buffer),
-        "base level %d level multiplier %.2f max bytes base %" PRIu64 " ",
-        base_level_, level_multiplier_, level_max_bytes_[base_level_]);
+          scratch->buffer, sizeof(scratch->buffer),
+          "base level %d level multiplier %.2f max bytes base %" PRIu64 " ",
+          base_level_, level_multiplier_, level_max_bytes_[base_level_]);
     }
   }
-  len += snprintf(scratch->buffer + len, sizeof(scratch->buffer) - len, "runs[");
+  len +=
+      snprintf(scratch->buffer + len, sizeof(scratch->buffer) - len, "runs[");
   for (int i = 0; i < num_levels(); i++) {
     int sz = sizeof(scratch->buffer) - len;
-    int ret = snprintf(scratch->buffer + len, sz, "%d ", int(sorted_runs_per_level_[i].size()));
+    int ret = snprintf(scratch->buffer + len, sz, "%d ",
+                       int(sorted_runs_per_level_[i].size()));
     if (ret < 0 || ret >= sz) {
       break;
     }
@@ -4598,10 +4604,10 @@ const char* VersionStorageInfo::RunsPerLevelSummary(
     // overwrite the last space
     --len;
   }
-  len += 
-    snprintf(scratch->buffer + len, sizeof(scratch->buffer) - len,
-              "] max score %.2f, estimated pending compaction bytes %" PRIu64,
-              compaction_score_[0], estimated_compaction_needed_bytes_);
+  len +=
+      snprintf(scratch->buffer + len, sizeof(scratch->buffer) - len,
+               "] max score %.2f, estimated pending compaction bytes %" PRIu64,
+               compaction_score_[0], estimated_compaction_needed_bytes_);
 
   if (!files_marked_for_compaction_.empty()) {
     snprintf(scratch->buffer + len, sizeof(scratch->buffer) - len,

@@ -345,6 +345,7 @@ void UpdateColumnFamilyOptions(const ImmutableCFOptions& ioptions,
 std::map<CompactionStyle, std::string>
     OptionsHelper::compaction_style_to_string = {
         {kCompactionStyleLevel, "kCompactionStyleLevel"},
+        {kCompactionStyleiLevel, "kCompactionStyleiLevel"},
         {kCompactionStyleUniversal, "kCompactionStyleUniversal"},
         {kCompactionStyleFIFO, "kCompactionStyleFIFO"},
         {kCompactionStyleNone, "kCompactionStyleNone"}};
