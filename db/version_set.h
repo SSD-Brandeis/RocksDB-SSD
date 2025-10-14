@@ -67,6 +67,8 @@
 
 namespace ROCKSDB_NAMESPACE {
 
+using SortedRun = std::vector<FileMetaData*>;
+
 namespace log {
 class Writer;
 }
@@ -146,6 +148,8 @@ class VersionStorageInfo {
   void Reserve(int level, size_t size) { files_[level].reserve(size); }
 
   void AddFile(int level, FileMetaData* f);
+
+  void AddRun(int level, const SortedRun& run);
 
   // Resize/Initialize the space for compact_cursor_
   void ResizeCompactCursors(int level) {
@@ -330,6 +334,10 @@ class VersionStorageInfo {
   // REQUIRES: This version has been saved (see VersionBuilder::SaveTo)
   const std::vector<FileMetaData*>& LevelFiles(int level) const {
     return files_[level];
+  }
+
+  const std::vector<SortedRun>& LevelRuns(int level) const {
+    return sorted_runs_per_level_[level];
   }
 
   bool HasMissingEpochNumber() const;
@@ -557,6 +565,7 @@ class VersionStorageInfo {
     char buffer[3000];
   };
   const char* LevelSummary(LevelSummaryStorage* scratch) const;
+  const char* RunsPerLevelSummary(LevelSummaryStorage* scratch) const;
   // Return a human-readable short (single-line) summary of files
   // in a specified level.  Uses *scratch as backing store.
   const char* LevelFileSummary(FileSummaryStorage* scratch, int level) const;
@@ -669,6 +678,10 @@ class VersionStorageInfo {
   // List of files per level, files in each level are arranged
   // in increasing order of keys
   std::vector<FileMetaData*>* files_;
+
+  // List of files per sorted run, files in each level are arranged
+  // into sorted runs (a.k.a tiers if number of sorted runs > 1 in a level)
+  std::vector<SortedRun>* sorted_runs_per_level_;
 
   // Map of all table files in version. Maps file number to (level, position on
   // level).

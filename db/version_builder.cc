@@ -1418,12 +1418,58 @@ class VersionBuilder::Rep {
     // Merge the set of added files with the set of pre-existing files.
     // Drop any deleted files.  Store the result in *vstorage.
     const auto& base_files = base_vstorage_->LevelFiles(level);
+    const auto& base_runs = base_vstorage_->LevelRuns(level);
     const auto& unordered_added_files = levels_[level].added_files;
     vstorage->Reserve(level, base_files.size() + unordered_added_files.size());
 
-    MergeUnorderdAddedFilesWithBase(
-        base_files, unordered_added_files, cmp,
+    AddNewelyAddedFilesWithBase(
+        level, vstorage, base_files, base_runs, unordered_added_files, cmp,
         [&](FileMetaData* file) { MaybeAddFile(vstorage, level, file); });
+    // (shubham)
+    // MergeUnorderdAddedFilesWithBase(
+    //     base_files, unordered_added_files, cmp,
+    //     [&](FileMetaData* file) { MaybeAddFile(vstorage, level, file); });
+  }
+
+  template <typename Cmp, typename AddFileFunc>
+  void AddNewelyAddedFilesWithBase(
+      int level, VersionStorageInfo* vstorage,
+      const std::vector<FileMetaData*>& base_files,
+      const std::vector<std::vector<FileMetaData*>>& base_runs,
+      const std::unordered_map<uint64_t, FileMetaData*>& unordered_added_files,
+      Cmp cmp, AddFileFunc add_file_func) const {
+    if (level < cfd_->GetLatestMutableCFOptions().ilevel && unordered_added_files.size() != 0) {
+      // Sort newly add files for the level
+      std::vector<FileMetaData*> added_files;
+      added_files.reserve(unordered_added_files.size());
+      for (const auto& pair : unordered_added_files) {
+        added_files.push_back(pair.second);
+      }
+      std::sort(added_files.begin(), added_files.end(), cmp);
+
+      auto base_iter = base_files.begin();
+      auto base_end = base_files.end();
+      auto added_iter = added_files.begin();
+      auto added_end = added_files.end();
+      while (added_iter != added_end || base_iter != base_end) {
+        if (base_iter == base_end ||
+            (added_iter != added_end && cmp(*added_iter, *base_iter))) {
+          add_file_func(*added_iter++);
+        } else {
+          add_file_func(*base_iter++);
+        }
+      }
+
+      auto base_run_iter = base_runs.begin();
+      while (base_run_iter != base_runs.end()) {
+        vstorage->AddRun(level, *base_run_iter++);
+      }
+
+      vstorage->AddRun(level, added_files);
+    } else {
+      MergeUnorderdAddedFilesWithBase(base_files, unordered_added_files, cmp,
+                                      add_file_func);
+    }
   }
 
   template <typename Cmp, typename AddFileFunc>

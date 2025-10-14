@@ -842,7 +842,10 @@ class FilePickerMultiGet {
   }
 };
 
-VersionStorageInfo::~VersionStorageInfo() { delete[] files_; }
+VersionStorageInfo::~VersionStorageInfo() {
+  delete[] files_;
+  delete[] sorted_runs_per_level_;
+}
 
 Version::~Version() {
   assert(refs_ == 0);
@@ -2160,6 +2163,7 @@ VersionStorageInfo::VersionStorageInfo(
       file_indexer_(user_comparator),
       compaction_style_(compaction_style),
       files_(new std::vector<FileMetaData*>[num_levels_]),
+      sorted_runs_per_level_(new std::vector<std::vector<FileMetaData*>>[num_levels_]),
       base_level_(num_levels_ == 1 ? -1 : 1),
       lowest_unnecessary_level_(-1),
       level_multiplier_(0.0),
@@ -3870,6 +3874,11 @@ void VersionStorageInfo::AddFile(int level, FileMetaData* f) {
   f->refs++;
 }
 
+void VersionStorageInfo::AddRun(int level, const SortedRun& run) {
+  auto& level_runs = sorted_runs_per_level_[level];
+  level_runs.push_back(run);
+}
+
 void VersionStorageInfo::AddBlobFile(
     std::shared_ptr<BlobFileMetaData> blob_file_meta) {
   assert(blob_file_meta);
@@ -4552,6 +4561,47 @@ const char* VersionStorageInfo::LevelSummary(
       snprintf(scratch->buffer + len, sizeof(scratch->buffer) - len,
                "] max score %.2f, estimated pending compaction bytes %" PRIu64,
                compaction_score_[0], estimated_compaction_needed_bytes_);
+
+  if (!files_marked_for_compaction_.empty()) {
+    snprintf(scratch->buffer + len, sizeof(scratch->buffer) - len,
+             " (%" ROCKSDB_PRIszt " files need compaction)",
+             files_marked_for_compaction_.size());
+  }
+
+  return scratch->buffer;
+}
+
+const char* VersionStorageInfo::RunsPerLevelSummary(
+  LevelSummaryStorage* scratch) const {
+  int len = 0;
+  // FIXME: (shubham) kCompactionStyleLevel can be changed to kCompactionStyleiLevel
+  if (compaction_style_ == kCompactionStyleLevel && num_levels() > 1) {
+    assert(base_level_ < static_cast<int>(level_max_bytes_.size()));
+    if (level_multiplier_ != 0.0) {
+      len = snprintf(
+        scratch->buffer, sizeof(scratch->buffer),
+        "base level %d level multiplier %.2f max bytes base %" PRIu64 " ",
+        base_level_, level_multiplier_, level_max_bytes_[base_level_]);
+    }
+  }
+  len += snprintf(scratch->buffer + len, sizeof(scratch->buffer) - len, "runs[");
+  for (int i = 0; i < num_levels(); i++) {
+    int sz = sizeof(scratch->buffer) - len;
+    int ret = snprintf(scratch->buffer + len, sz, "%d ", int(sorted_runs_per_level_[i].size()));
+    if (ret < 0 || ret >= sz) {
+      break;
+    }
+    len += ret;
+  }
+
+  if (len > 0) {
+    // overwrite the last space
+    --len;
+  }
+  len += 
+    snprintf(scratch->buffer + len, sizeof(scratch->buffer) - len,
+              "] max score %.2f, estimated pending compaction bytes %" PRIu64,
+              compaction_score_[0], estimated_compaction_needed_bytes_);
 
   if (!files_marked_for_compaction_.empty()) {
     snprintf(scratch->buffer + len, sizeof(scratch->buffer) - len,

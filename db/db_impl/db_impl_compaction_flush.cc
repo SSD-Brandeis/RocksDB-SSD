@@ -316,6 +316,9 @@ Status DBImpl::FlushMemTableToOutputFile(
     ROCKS_LOG_BUFFER(log_buffer, "[%s] Level summary: %s\n",
                      column_family_name.c_str(),
                      storage_info->LevelSummary(&tmp));
+    ROCKS_LOG_BUFFER(log_buffer, "[%s] Runs per Level summary: %s\n",
+                     column_family_name.c_str(),
+                     storage_info->RunsPerLevelSummary(&tmp));
 
     const auto& blob_files = storage_info->GetBlobFiles();
     if (!blob_files.empty()) {
