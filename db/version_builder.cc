@@ -13,6 +13,7 @@
 #include <atomic>
 #include <cinttypes>
 #include <functional>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <set>
@@ -1438,7 +1439,8 @@ class VersionBuilder::Rep {
       const std::vector<std::vector<FileMetaData*>>& base_runs,
       const std::unordered_map<uint64_t, FileMetaData*>& unordered_added_files,
       Cmp cmp, AddFileFunc add_file_func) const {
-    if (level < cfd_->GetLatestMutableCFOptions().ilevel && unordered_added_files.size() != 0) {
+    if (level <= cfd_->GetLatestMutableCFOptions().ilevel &&
+        unordered_added_files.size() != 0) {
       // Sort newly add files for the level
       std::vector<FileMetaData*> added_files;
       added_files.reserve(unordered_added_files.size());
