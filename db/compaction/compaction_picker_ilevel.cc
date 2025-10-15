@@ -3,6 +3,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <iostream>
 
 #include "db/version_edit.h"
 #include "logging/log_buffer.h"
@@ -69,9 +70,9 @@ class ILevelCompactionBuilder {
   // Pick the initial files to compact to the next level.
   void SetupInitialFiles();
 
-  // // If the initial files are from L0 level, pick other L0
-  // // files if needed.
-  // bool SetupOtherL0FilesIfNeeded();
+  // If the initial files are from Li level, pick other Li
+  // files if needed.
+  bool SetupOtherLIFilesIfNeeded();
 
   // // Compaction with round-robin compaction priority allows more files to be
   // // picked to form a large compaction
@@ -81,7 +82,7 @@ class ILevelCompactionBuilder {
   // in this compaction for level > ilevel + 1, accordingly.
   bool SetupOtherInputsIfNeeded();
 
-  // Compaction* GetCompaction();
+  Compaction* GetCompaction();
 
   // From `start_level_`, pick files to compact to `output_level_`.
   // Returns false if there is no file to compact.
@@ -137,28 +138,78 @@ class ILevelCompactionBuilder {
   LogBuffer* log_buffer_;
   int start_level_ = -1;
   int output_level_ = -1;
-  // int parent_index_ = -1;
+  int parent_index_ = -1;
   int base_index_ = -1;
   double start_level_score_ = 0;
-  // bool is_manual_ = false;
-  // bool is_l0_trivial_move_ = false;
+  bool is_manual_ = false;
+  bool is_lI_trivial_move_ = false;
   CompactionInputFiles start_level_inputs_;
   std::vector<CompactionInputFiles> compaction_inputs_;
   CompactionInputFiles output_level_inputs_;
-  // std::vector<FileMetaData*> grandparents_;
+  std::vector<FileMetaData*> grandparents_;
   CompactionReason compaction_reason_ = CompactionReason::kUnknown;
 
   const MutableCFOptions& mutable_cf_options_;
   const ImmutableOptions& ioptions_;
   const MutableDBOptions& mutable_db_options_;
-  // // Pick a path ID to place a newly generated file, with its level
-  // static uint32_t GetPathId(const ImmutableCFOptions& ioptions,
-  //                           const MutableCFOptions& mutable_cf_options,
-  //                           int level);
+  // Pick a path ID to place a newly generated file, with its level
+  // right now using compaction_picker_level's GetPathID
+  static uint32_t GetPathId_ilevel(const ImmutableCFOptions& ioptions,
+                            const MutableCFOptions& mutable_cf_options,
+                            int level, int ilevel_);
 
   // static const int kMinFilesForIntraL0Compaction = 4;
   int ilevel_ = 0;
 };
+
+uint32_t ILevelCompactionBuilder::GetPathId_ilevel(
+    const ImmutableCFOptions& ioptions,
+    const MutableCFOptions& mutable_cf_options, int level, int ilevel_) {
+  uint32_t p = 0;
+  assert(!ioptions.cf_paths.empty());
+
+  // size remaining in the most recent path
+  uint64_t current_path_size = ioptions.cf_paths[0].target_size;
+
+  uint64_t level_size;
+  int cur_level = 0;
+
+  // max_bytes_for_level_base denotes L1 size.
+  // We estimate L0 size to be the same as L1.
+  level_size = mutable_cf_options.max_bytes_for_level_base;
+
+  // Last path is the fallback
+  while (p < ioptions.cf_paths.size() - 1) {
+    if (level_size <= current_path_size) {
+      if (cur_level == level) {
+        // Does desired level fit in this path?
+        return p;
+      } else {
+        current_path_size -= level_size;
+        if (cur_level > ilevel_) {
+          if (ioptions.level_compaction_dynamic_level_bytes) {
+            // Currently, level_compaction_dynamic_level_bytes is ignored when
+            // multiple db paths are specified. https://github.com/facebook/
+            // rocksdb/blob/main/db/column_family.cc.
+            // Still, adding this check to avoid accidentally using
+            // max_bytes_for_level_multiplier_additional
+            level_size = static_cast<uint64_t>(
+                level_size * mutable_cf_options.max_bytes_for_level_multiplier);
+          } else {
+            level_size = static_cast<uint64_t>(
+                level_size * mutable_cf_options.max_bytes_for_level_multiplier *
+                mutable_cf_options.MaxBytesMultiplerAdditional(cur_level));
+          }
+        }
+        cur_level++;
+        continue;
+      }
+    }
+    p++;
+    current_path_size = ioptions.cf_paths[p].target_size;
+  }
+  return p;
+}
 
 bool ILevelCompactionBuilder::TryExtendNonLITrivialMove(
     int start_index, bool only_expand_right) {
@@ -271,6 +322,7 @@ bool ILevelCompactionBuilder::PickFileToCompact() {
       auto* f = level_files[index];
       start_level_inputs_.files.push_back(f);
     }
+    output_level_ = start_level_+1;
     // Since this is a tiering implementation, we can return true here
     //  as we don't have to check the overlapping files on the next level
     return true;
@@ -391,6 +443,108 @@ void ILevelCompactionBuilder::SetupInitialFiles() {
   return;
 }
 
+bool ILevelCompactionBuilder::SetupOtherInputsIfNeeded() {
+  // Setup input files from output level. For output to L0 to level i, we only compact
+  // spans of files that do not interact with any pending compactions, so don't
+  // need to consider other levels.
+  if (output_level_ > ilevel_){
+    output_level_inputs_.level = output_level_;
+    // we do not consider rr right now
+    bool round_robin_expanding =
+        ioptions_.compaction_pri == kRoundRobin &&
+        compaction_reason_ == CompactionReason::kLevelMaxLevelSize;
+    
+    // if (round_robin_expanding) {
+    //   SetupOtherFilesWithRoundRobinExpansion();
+    // }
+    if (!is_lI_trivial_move_ &&
+        !compaction_picker_->SetupOtherInputs(
+            cf_name_, mutable_cf_options_, vstorage_, &start_level_inputs_,
+            &output_level_inputs_, &parent_index_, base_index_,
+            round_robin_expanding)) {
+      return false;
+    }
+
+    compaction_inputs_.push_back(start_level_inputs_);
+    if (!output_level_inputs_.empty()) {
+      compaction_inputs_.push_back(output_level_inputs_);
+    }
+
+    // In some edge cases we could pick a compaction that will be compacting
+    // a key range that overlap with another running compaction, and both
+    // of them have the same output level. This could happen if
+    // (1) we are running a non-exclusive manual compaction
+    // (2) AddFile ingest a new file into the LSM tree
+    // We need to disallow this from happening.
+    if (compaction_picker_->FilesRangeOverlapWithCompaction(
+            compaction_inputs_, output_level_,
+            Compaction::EvaluatePenultimateLevel(vstorage_, mutable_cf_options_,
+                                                 ioptions_, start_level_,
+                                                 output_level_))) {
+      // This compaction output could potentially conflict with the output
+      // of a currently running compaction, we cannot run it.
+      return false;
+    }
+    if (!is_lI_trivial_move_) {
+      compaction_picker_->GetGrandparents(vstorage_, start_level_inputs_,
+                                          output_level_inputs_, &grandparents_);
+    }
+  } else {
+    compaction_inputs_.push_back(start_level_inputs_);
+  }
+  return true;
+}
+
+bool ILevelCompactionBuilder::SetupOtherLIFilesIfNeeded() {
+  if (start_level_ <= ilevel_ && output_level_ > ilevel_ && !is_lI_trivial_move_) {
+    return compaction_picker_->GetOverlappingL0Files(
+        vstorage_, &start_level_inputs_, output_level_, &parent_index_);
+  }
+  return true;
+}
+
+Compaction* ILevelCompactionBuilder::GetCompaction() {
+  // TryPickLITrivialMove() does not apply to the case when compacting LI to an
+  // empty output level. So LI files is picked in PickFileToCompact() by
+  // compaction score. We may still be able to do trivial move when this file
+  // does not overlap with other LIs. This happens when
+  // compaction_inputs_[0].size() == 1 since SetupOtherLIFilesIfNeeded() did not
+  // pull in more LIs.
+  // TODO (steven): need to rewrite the above comment base on our function
+  assert(!compaction_inputs_.empty());
+  bool lI_files_might_overlap =
+      start_level_ <= ilevel_ && !is_lI_trivial_move_ &&
+      (compaction_inputs_.size() > 1 || compaction_inputs_[start_level_].size() > 1);
+  auto c = new Compaction(
+      vstorage_, ioptions_, mutable_cf_options_, mutable_db_options_,
+      std::move(compaction_inputs_), output_level_,
+      MaxFileSizeForLevel(mutable_cf_options_, output_level_,
+                          ioptions_.compaction_style, vstorage_->base_level(),
+                          ioptions_.level_compaction_dynamic_level_bytes),
+      mutable_cf_options_.max_compaction_bytes,
+      GetPathId_ilevel(ioptions_, mutable_cf_options_, output_level_, ilevel_),
+      GetCompressionType(vstorage_, mutable_cf_options_, output_level_,
+                         vstorage_->base_level()),
+      GetCompressionOptions(mutable_cf_options_, vstorage_, output_level_),
+      mutable_cf_options_.default_write_temperature,
+      /* max_subcompactions */ 0, std::move(grandparents_),
+      /* earliest_snapshot */ std::nullopt, /* snapshot_checker */ nullptr,
+      is_manual_,
+      /* trim_ts */ "", start_level_score_, false /* deletion_compaction */,
+      lI_files_might_overlap, compaction_reason_);
+
+  // If it's level i or smaller compaction, make sure we don't execute any other related level
+  // compactions in parallel
+  compaction_picker_->RegisterCompaction(c);
+
+  // Creating a compaction influences the compaction score because the score
+  // takes running compactions into account (by skipping files that are already
+  // being compacted). Since we just changed compaction score, we recalculate it
+  // here
+  vstorage_->ComputeCompactionScore(ioptions_, mutable_cf_options_);
+  return c;
+}
+
 Compaction* ILevelCompactionBuilder::PickCompaction() {
   // Pick up the first level/file to start compactions.
   //
@@ -403,9 +557,27 @@ Compaction* ILevelCompactionBuilder::PickCompaction() {
   if (start_level_inputs_.empty()) {
     return nullptr;
   }
+  std::cout << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__ << " start_level_:" << start_level_ << " output_level_:" << output_level_ << std::endl << std::flush;
   assert(start_level_ >= 0 && output_level_ >= 0);
 
-  // TODO: (steven) Implement the rest of the function
+  // According to my debug in level picker, level 0 will always output 1 file, 
+  // so I think we need this function
+  if (!SetupOtherLIFilesIfNeeded()) {
+    return nullptr;
+  }
+
+  // Pick files in the output level and expand more files in the start level
+  // if needed.
+  if (!SetupOtherInputsIfNeeded()) {
+    return nullptr;
+  }
+
+  // Form a compaction object containing the files we picked.
+  Compaction* c = GetCompaction();
+
+  TEST_SYNC_POINT_CALLBACK("LevelCompactionPicker::PickCompaction:Return", c);
+
+  return c;
 }
 
 }  // namespace

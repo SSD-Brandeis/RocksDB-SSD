@@ -816,6 +816,7 @@ std::unordered_map<std::string, EncodingType>
 std::unordered_map<std::string, CompactionStyle>
     OptionsHelper::compaction_style_string_map = {
         {"kCompactionStyleLevel", kCompactionStyleLevel},
+        {"kCompactionStyleiLevel", kCompactionStyleiLevel},
         {"kCompactionStyleUniversal", kCompactionStyleUniversal},
         {"kCompactionStyleFIFO", kCompactionStyleFIFO},
         {"kCompactionStyleNone", kCompactionStyleNone}};
