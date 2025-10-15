@@ -514,6 +514,54 @@ class VersionBuilder::Rep {
     return Status::OK();
   }
 
+  template <typename Checker>
+  Status CheckConsistencyDetailsForLeveli(
+      const VersionStorageInfo* vstorage, int level, int sortedruns,
+      Checker checker, const std::string& sync_point,
+      ExpectedLinkedSsts* expected_linked_ssts) const {
+#ifdef NDEBUG
+    (void)sync_point;
+#endif
+
+    assert(vstorage);
+    assert(level >= 0 && level < num_levels_);
+    assert(expected_linked_ssts);
+
+    const auto& sorted_run = vstorage->LevelRuns(level)[sortedruns];
+
+    if (sorted_run.empty()) {
+      return Status::OK();
+    }
+
+    assert(sorted_run[0]);
+    UpdateExpectedLinkedSsts(sorted_run[0]->fd.GetNumber(),
+                             sorted_run[0]->oldest_blob_file_number,
+                             expected_linked_ssts);
+
+    for (size_t i = 1; i < sorted_run.size(); ++i) {
+      assert(sorted_run[i]);
+      UpdateExpectedLinkedSsts(sorted_run[i]->fd.GetNumber(),
+                               sorted_run[i]->oldest_blob_file_number,
+                               expected_linked_ssts);
+
+      auto lhs = sorted_run[i - 1];
+      auto rhs = sorted_run[i];
+
+#ifndef NDEBUG
+      auto pair = std::make_pair(&lhs, &rhs);
+      TEST_SYNC_POINT_CALLBACK(sync_point, &pair);
+#endif
+
+      const Status s = checker(lhs, rhs);
+      if (!s.ok()) {
+        return s;
+      }
+    }
+
+    return Status::OK();
+  }
+
+
   // Make sure table files are sorted correctly and that the links between
   // table files and blob files are consistent.
   Status CheckConsistencyDetails(const VersionStorageInfo* vstorage) const {
@@ -528,7 +576,9 @@ class VersionBuilder::Rep {
       assert(icmp);
       // Check L0
       {
-        auto l0_checker = [this, epoch_number_requirement, icmp](
+        for (int level = 1; level < cfd_->GetLatestMutableCFOptions().ilevel; ++level){
+        for (int sortedruns = 0; sortedruns < static_cast<int>(vstorage->LevelRuns(level).size()); ++sortedruns){
+        auto li_checker = [this, epoch_number_requirement, icmp](
                               const FileMetaData* lhs,
                               const FileMetaData* rhs) {
           assert(lhs);
@@ -581,17 +631,17 @@ class VersionBuilder::Rep {
           return Status::OK();
         };
 
-        const Status s = CheckConsistencyDetailsForLevel(
-            vstorage, /* level */ 0, l0_checker,
+        const Status s = CheckConsistencyDetailsForLeveli(
+            vstorage, /* level */ level, sortedruns, li_checker,
             "VersionBuilder::CheckConsistency0", &expected_linked_ssts);
         if (!s.ok()) {
           return s;
         }
-      }
+      }}}
+      
+      // Check Li+1 and up
 
-      // Check L1 and up
-
-      for (int level = 1; level < num_levels_; ++level) {
+      for (int level = cfd_->GetLatestMutableCFOptions().ilevel + 1; level < num_levels_; ++level) {
         auto checker = [this, level, icmp](const FileMetaData* lhs,
                                            const FileMetaData* rhs) {
           assert(lhs);
