@@ -328,6 +328,12 @@ class VersionStorageInfo {
     return static_cast<int>(files_[level].size());
   }
 
+  // REQUIRED: This version has been saved (see VersionBuilder::SaveTo)
+  int NumLevelRuns(int level) const {
+    assert(finalized_);
+    return static_cast<int>(sorted_runs_per_level_[level].size());
+  }
+
   // Return the combined file size of all files at the specified level.
   uint64_t NumLevelBytes(int level) const;
 

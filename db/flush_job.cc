@@ -355,6 +355,12 @@ Status FlushJob::Run(LogsWithPrepTracker* prep_tracker, FileMetaData* file_meta,
     stream << vstorage->NumLevelFiles(level);
   }
   stream.EndArray();
+  stream << "lsm_runs_state";
+  stream.StartArray();
+  for (int level = 0; level < vstorage->num_levels(); ++level) {
+    stream << vstorage->NumLevelRuns(level);
+  }
+  stream.EndArray();
 
   const auto& blob_files = vstorage->GetBlobFiles();
   if (!blob_files.empty()) {

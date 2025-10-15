@@ -101,6 +101,8 @@ const char* GetCompactionReasonString(CompactionReason compaction_reason) {
       return "RoundRobinTtl";
     case CompactionReason::kRefitLevel:
       return "RefitLevel";
+    case CompactionReason::kLevelLiFilesNum:
+      return "LevelLiFilesNum";
     case CompactionReason::kNumOfReasons:
       // fall through
     default:
@@ -1045,6 +1047,13 @@ Status CompactionJob::Install(bool* compaction_released) {
   stream.StartArray();
   for (int level = 0; level < vstorage->num_levels(); ++level) {
     stream << vstorage->NumLevelFiles(level);
+  }
+  stream.EndArray();
+
+  stream << "lsm_runs_state";
+  stream.StartArray();
+  for (int level = 0; level < vstorage->num_levels(); ++level) {
+    stream << vstorage->NumLevelRuns(level);
   }
   stream.EndArray();
 
