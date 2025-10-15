@@ -3254,7 +3254,8 @@ void VersionStorageInfo::ComputeCompensatedSizes() {
 }
 
 int VersionStorageInfo::MaxInputLevel() const {
-  if (compaction_style_ == kCompactionStyleLevel) {
+  if (compaction_style_ == kCompactionStyleLevel ||
+      compaction_style_ == kCompactionStyleiLevel) {
     return num_levels() - 2;
   }
   return 0;
@@ -3512,8 +3513,8 @@ void VersionStorageInfo::ComputeCompactionScore(
         if (compaction_style_ == kCompactionStyleiLevel) {
           score = static_cast<double>(sorted_runs_per_level_[level].size()) /
                   mutable_cf_options.level0_file_num_compaction_trigger;
-        }
-        else if (compaction_style_ == kCompactionStyleLevel && num_levels() > 1) {
+        } else if (compaction_style_ == kCompactionStyleLevel &&
+                   num_levels() > 1) {
           // Level-based involves L0->L0 compactions that can lead to oversized
           // L0 files. Take into account size as well to avoid later giant
           // compactions to the base level.
@@ -3558,7 +3559,7 @@ void VersionStorageInfo::ComputeCompactionScore(
           }
         }
       }
-    } else {  // level > 0
+    } else {  // level > ilevel
       // Compute the ratio of current size to size limit.
       uint64_t level_bytes_no_compacting = 0;
       uint64_t level_total_bytes = 0;
