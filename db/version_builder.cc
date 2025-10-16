@@ -515,8 +515,8 @@ class VersionBuilder::Rep {
   }
 
   template <typename Checker>
-  Status CheckConsistencyDetailsForLeveli(
-      const VersionStorageInfo* vstorage, int level, int sortedruns,
+  Status CheckConsistencyDetailsForiLevel(
+      const VersionStorageInfo* vstorage, int level, int sorted_run,
       Checker checker, const std::string& sync_point,
       ExpectedLinkedSsts* expected_linked_ssts) const {
 #ifdef NDEBUG
@@ -527,25 +527,25 @@ class VersionBuilder::Rep {
     assert(level >= 0 && level < num_levels_);
     assert(expected_linked_ssts);
 
-    const auto& sorted_run = vstorage->LevelRuns(level)[sortedruns];
+    const auto& sorted_run_files = vstorage->LevelRuns(level)[sorted_run];
 
-    if (sorted_run.empty()) {
+    if (sorted_run_files.empty()) {
       return Status::OK();
     }
 
-    assert(sorted_run[0]);
-    UpdateExpectedLinkedSsts(sorted_run[0]->fd.GetNumber(),
-                             sorted_run[0]->oldest_blob_file_number,
+    assert(sorted_run_files[0]);
+    UpdateExpectedLinkedSsts(sorted_run_files[0]->fd.GetNumber(),
+                             sorted_run_files[0]->oldest_blob_file_number,
                              expected_linked_ssts);
 
-    for (size_t i = 1; i < sorted_run.size(); ++i) {
-      assert(sorted_run[i]);
-      UpdateExpectedLinkedSsts(sorted_run[i]->fd.GetNumber(),
-                               sorted_run[i]->oldest_blob_file_number,
+    for (size_t i = 1; i < sorted_run_files.size(); ++i) {
+      assert(sorted_run_files[i]);
+      UpdateExpectedLinkedSsts(sorted_run_files[i]->fd.GetNumber(),
+                               sorted_run_files[i]->oldest_blob_file_number,
                                expected_linked_ssts);
 
-      auto lhs = sorted_run[i - 1];
-      auto rhs = sorted_run[i];
+      auto lhs = sorted_run_files[i - 1];
+      auto rhs = sorted_run_files[i];
 
 #ifndef NDEBUG
       auto pair = std::make_pair(&lhs, &rhs);
@@ -573,16 +573,29 @@ class VersionBuilder::Rep {
       EpochNumberRequirement epoch_number_requirement =
           vstorage->GetEpochNumberRequirement();
       assert(icmp);
-      // Check L0
+      // Check L0 till iLevel
       {
-        for (int level = 1; level < cfd_->GetLatestMutableCFOptions().ilevel;
+        for (int level = 0; level <= cfd_->GetLatestMutableCFOptions().ilevel;
              ++level) {
-          for (int sortedruns = 0;
-               sortedruns < static_cast<int>(vstorage->LevelRuns(level).size());
-               ++sortedruns) {
-            auto li_checker = [this, epoch_number_requirement, icmp](
-                                  const FileMetaData* lhs,
-                                  const FileMetaData* rhs) {
+          for (int sorted_run = 0;
+               sorted_run < static_cast<int>(vstorage->LevelRuns(level).size());
+               ++sorted_run) {
+            // check if runs are ordered properly
+            const auto& runs = vstorage->LevelRuns(level);
+            for (int r = 0; r + 1 < static_cast<int>(runs.size()); ++r) {
+              auto* first = runs[r].front();
+              auto* second = runs[r + 1].front();
+              if (first->fd.largest_seqno < second->fd.largest_seqno) {
+                return Status::Corruption(
+                    "VersionBuilder",
+                    "Tiered runs not ordered properly by seqno");
+              }
+            }
+
+            auto ilevel_checker = [this, level, sorted_run,
+                                   epoch_number_requirement,
+                                   icmp](const FileMetaData* lhs,
+                                         const FileMetaData* rhs) {
               assert(lhs);
               assert(rhs);
 
@@ -590,7 +603,8 @@ class VersionBuilder::Rep {
                   EpochNumberRequirement::kMightMissing) {
                 if (!level_zero_cmp_by_seqno_->operator()(lhs, rhs)) {
                   std::ostringstream oss;
-                  oss << "L0 files are not sorted properly: files #"
+                  oss << "L" << level << " Run: " << sorted_run
+                      << " files are not sorted properly: files #"
                       << lhs->fd.GetNumber()
                       << " with seqnos (largest, smallest) "
                       << lhs->fd.largest_seqno << " , "
@@ -609,7 +623,8 @@ class VersionBuilder::Rep {
 
                   if (range_overlapped) {
                     std::ostringstream oss;
-                    oss << "L0 files of same epoch number but overlapping "
+                    oss << "L" << level << " Run: " << sorted_run
+                        << " files of same epoch number but overlapping "
                            "range #"
                         << lhs->fd.GetNumber() << " , smallest key: "
                         << lhs->smallest.DebugString(true)
@@ -624,21 +639,44 @@ class VersionBuilder::Rep {
                   }
                 }
 
-                if (!level_zero_cmp_by_epochno_->operator()(lhs, rhs)) {
+                if (level == 0 &&
+                    !level_zero_cmp_by_epochno_->operator()(lhs, rhs)) {
                   std::ostringstream oss;
-                  oss << "L0 files are not sorted properly: files #"
+                  oss << "L" << level << " Run: " << sorted_run
+                      << " files are not sorted properly: files #"
                       << lhs->fd.GetNumber() << " with epoch number "
                       << lhs->epoch_number << ", #" << rhs->fd.GetNumber()
                       << " with epoch number " << rhs->epoch_number;
                   return Status::Corruption("VersionBuilder", oss.str());
+                } else {
+                  if (!level_nonzero_cmp_->operator()(lhs, rhs)) {
+                    std::ostringstream oss;
+                    oss << 'L' << level << " Run: " << sorted_run
+                        << " files are not sorted properly: files #"
+                        << lhs->fd.GetNumber() << ", #" << rhs->fd.GetNumber();
+
+                    return Status::Corruption("VersionBuilder", oss.str());
+                  }
+
+                  // Make sure there is no overlap in level
+                  if (icmp->Compare(lhs->largest, rhs->smallest) >= 0) {
+                    std::ostringstream oss;
+                    oss << 'L' << level << " has overlapping ranges: file #"
+                        << lhs->fd.GetNumber()
+                        << " largest key: " << lhs->largest.DebugString(true)
+                        << " vs. file #" << rhs->fd.GetNumber()
+                        << " smallest key: " << rhs->smallest.DebugString(true);
+
+                    return Status::Corruption("VersionBuilder", oss.str());
+                  }
                 }
               }
 
               return Status::OK();
             };
 
-            const Status s = CheckConsistencyDetailsForLeveli(
-                vstorage, /* level */ level, sortedruns, li_checker,
+            const Status s = CheckConsistencyDetailsForiLevel(
+                vstorage, level, sorted_run, ilevel_checker,
                 "VersionBuilder::CheckConsistency0", &expected_linked_ssts);
             if (!s.ok()) {
               return s;
@@ -1540,13 +1578,18 @@ class VersionBuilder::Rep {
       }
     }
 
-    auto base_run_iter = base_runs.begin();
-    while (base_run_iter != base_runs.end()) {
-      add_run_func(*base_run_iter++);
+    std::vector<SortedRun> merged_runs = base_runs;
+    if (!added_files.empty()) {
+      merged_runs.push_back(added_files);
     }
 
-    if (!added_files.empty()) {
-      add_run_func(added_files);
+    std::sort(merged_runs.begin(), merged_runs.end(),
+              [&](const SortedRun& r1, const SortedRun& r2) {
+                assert(!r1.empty() && !r2.empty());
+                return cmp(r1.front(), r2.front());
+              });
+    for (const auto& run : merged_runs) {
+      add_run_func(run);
     }
   }
 
