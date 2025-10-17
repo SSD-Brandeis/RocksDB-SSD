@@ -572,7 +572,7 @@ bool Compaction::IsTrivialMove() const {
   }
 
   // since all levels below ilevel are tiered they might overlap
-  if (start_level_ < cfd_->GetLatestMutableCFOptions().ilevel) {
+  if (start_level_ <= cfd_->GetLatestMutableCFOptions().ilevel) {
     std::vector<FileMetaData*> sorted_files;
     sorted_files.reserve(inputs_.front().files.size());
     for (const auto& f : inputs_.front().files) {
