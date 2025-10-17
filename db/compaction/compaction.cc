@@ -348,7 +348,7 @@ Compaction::Compaction(
               : EvaluatePenultimateLevel(vstorage, mutable_cf_options_,
                                          immutable_options_, start_level_,
                                          output_level_)),
-      dynamic_file_size(mutable_cf_options_.dynamic_file_size){
+      dynamic_file_size(mutable_cf_options_.dynamic_file_size) {
   MarkFilesBeingCompacted(true);
   if (is_manual_compaction_) {
     compaction_reason_ = CompactionReason::kManualCompaction;
@@ -359,9 +359,10 @@ Compaction::Compaction(
 
   // for the non-bottommost levels, it tries to build files match the target
   // file size, but not guaranteed. It could be 2x the size of the target size.
-  max_output_file_size_ = dynamic_file_size && !(bottommost_level_ || grandparents_.empty())
-                              ? 2 * target_output_file_size_
-                              : target_output_file_size_;
+  max_output_file_size_ =
+      dynamic_file_size && !(bottommost_level_ || grandparents_.empty())
+          ? 2 * target_output_file_size_
+          : target_output_file_size_;
 
 #ifndef NDEBUG
   for (size_t i = 1; i < inputs_.size(); ++i) {
@@ -568,6 +569,29 @@ bool Compaction::IsTrivialMove() const {
     // We cannot move files from L0 to L1 if the L0 files in the LSM-tree are
     // overlapping, unless we are sure that files picked in L0 don't overlap.
     return false;
+  }
+
+  // since all levels below ilevel are tiered they might overlap
+  if (start_level_ < cfd_->GetLatestMutableCFOptions().ilevel) {
+    std::vector<FileMetaData*> sorted_files;
+    sorted_files.reserve(inputs_.front().files.size());
+    for (const auto& f : inputs_.front().files) {
+      sorted_files.push_back(f);
+    }
+    const InternalKeyComparator* icmp = input_vstorage_->InternalComparator();
+    std::sort(sorted_files.begin(), sorted_files.end(),
+              [&](const FileMetaData* a, const FileMetaData* b) {
+                return icmp->Compare(a->smallest, b->smallest) < 0;
+              });
+    
+    // check for overlapping key ranges
+    for (size_t i = 1; i < sorted_files.size(); ++i) {
+      const FileMetaData* prev = sorted_files[i-1];
+      const FileMetaData* curr = sorted_files[i];
+      if (icmp->Compare(prev->largest, curr->smallest) >= 0) {
+        return false;
+      }
+    }
   }
 
   if (is_manual_compaction_ &&
