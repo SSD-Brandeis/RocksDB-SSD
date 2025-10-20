@@ -16,6 +16,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <sstream>
 
 #include "rocksdb/attribute_groups.h"
 #include "rocksdb/block_cache_trace_writer.h"
@@ -2172,6 +2173,17 @@ class DB {
   // secondary.
   virtual Status TryCatchUpWithPrimary() {
     return Status::NotSupported("Supported only by secondary instance");
+  }
+
+  virtual std::string GetLevelsState() {
+    // Must be implemented by child class
+    return "";
+  }
+
+  virtual std::tuple<unsigned long long, std::string> GetTreeState() {
+    // Must be implemented by the child class
+    std::stringstream ss;
+    return std::make_tuple(0, ss.str());
   }
 };
 

@@ -31,6 +31,106 @@
 
 namespace ROCKSDB_NAMESPACE {
 
+  std::string DBImpl::GetLevelsState() {
+  std::stringstream all_level_details;
+  all_level_details.str("");
+
+  auto cfh =
+      static_cast_with_check<ColumnFamilyHandleImpl>(DefaultColumnFamily());
+  ColumnFamilyData* cfd = cfh->cfd();
+  auto storage_info = cfd->current()->storage_info();
+  for (int l = 0; l < storage_info->num_non_empty_levels(); l++) {
+    all_level_details << storage_info->LevelFilesBrief(l).num_files << ",";
+  }
+  return all_level_details.str();
+}
+
+/**
+ * (shubham) Deprecated, as it throws errors when accessing VersionStorageInfo.
+ * The compactions updates the VersionStorageInfo which is not protected with
+ * mutex.
+ */
+std::tuple<unsigned long long, std::string> DBImpl::GetTreeState() {
+  using TypedHandle = TableCache::TypedHandle;
+
+  Status s;
+  TableReader* table_reader = nullptr;
+  TypedHandle* handle = nullptr;
+
+  auto cfh =
+      static_cast_with_check<ColumnFamilyHandleImpl>(DefaultColumnFamily());
+  ColumnFamilyData* cfd = cfh->cfd();
+  auto storage_info = cfd->current()->storage_info();
+
+  std::stringstream all_level_details;
+  all_level_details.str("");
+  unsigned long long total_entries_in_cfd = 0;
+
+  for (int l = 0; l < storage_info->num_non_empty_levels(); l++) {
+    std::stringstream level_details;
+    level_details.str("");
+    auto level_files_brief_ = storage_info->LevelFilesBrief(l);
+    // auto num_files = storage_info->LevelFilesBrief(l).num_files;
+    unsigned long long level_size_in_bytes = 0;
+    level_details << "\tLevel: " << std::to_string(l)<<std::endl;
+
+    unsigned long long total_entries_in_one_level = 0;
+    std::stringstream level_sst_file_details;
+    std::stringstream sorted_run_details;
+    std::vector<SortedRun> sorted_runs_ = storage_info->LevelRuns(l);
+    for (size_t run = 0; run < sorted_runs_.size(); run ++){
+      sorted_run_details << "\t\tSorted Run: "<< std::to_string(run)<<std::endl;
+      for (size_t files = 0; files < sorted_runs_[run].size(); files ++){
+        table_reader = nullptr;
+        handle = nullptr;
+        auto file_meta = sorted_runs_[run][files];
+
+        table_reader = file_meta->fd.table_reader;
+        if (table_reader == nullptr) {
+          auto mutable_cf_options_ = cfd->GetLatestMutableCFOptions();
+          auto file_read_hist = cfd->internal_stats()->GetFileReadHist(0);
+          auto max_file_size_for_l0_meta_pin_ =
+              MaxFileSizeForL0MetaPin(mutable_cf_options_);
+          s = cfd->table_cache()->FindTable(
+              read_options_, file_options_, cfd->internal_comparator(),
+              *file_meta, &(handle),
+              mutable_cf_options_,
+              read_options_.read_tier == kBlockCacheTier /* no_io */,
+              file_read_hist, false, l, true, max_file_size_for_l0_meta_pin_,
+              file_meta->temperature);
+
+          if (s.ok()) {
+            table_reader = cfd->table_cache()->get_cache().Value(handle);
+          }  // (Shubham) What if table_reader is still null?
+        }
+
+        auto tp = table_reader->GetTableProperties();
+        total_entries_in_one_level += tp->num_entries;
+        level_size_in_bytes += file_meta->fd.GetFileSize();
+
+        level_sst_file_details
+
+            << "[#" << std::to_string(file_meta->fd.GetNumber()) << ":"
+            << std::to_string(file_meta->fd.file_size) << " ("
+            << file_meta->smallest.user_key().ToString() << ", "
+            << file_meta->largest.user_key().ToString() << ") "
+            << tp->num_entries << "], \n\t\t\t";
+      }
+      sorted_run_details << "\t\tFiles: \n\t\t\t" << level_sst_file_details.str() <<"\n";
+    }
+
+    total_entries_in_cfd += total_entries_in_one_level;
+    level_details << "\t\tSize: " << level_size_in_bytes
+                  << " bytes, Files Count: " << level_files_brief_.num_files
+                  << ", Entries Count: " << total_entries_in_one_level
+                  << "\n";
+    all_level_details << level_details.str() << sorted_run_details.str()
+                      << std::endl;
+  }
+
+  return std::make_tuple(total_entries_in_cfd, all_level_details.str());
+}
+
 bool DBImpl::EnoughRoomForCompaction(
     ColumnFamilyData* cfd, const std::vector<CompactionInputFiles>& inputs,
     bool* sfm_reserved_compact_space, LogBuffer* log_buffer) {
