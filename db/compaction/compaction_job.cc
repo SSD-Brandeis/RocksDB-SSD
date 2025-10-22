@@ -1221,7 +1221,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   // the AddTombstones calls will be propagated down to the v1 aggregator.
   std::unique_ptr<InternalIterator> raw_input(versions_->MakeInputIterator(
       read_options, sub_compact->compaction, sub_compact->RangeDelAgg(),
-      file_options_for_read_, start, end));
+      file_options_for_read_, start, end, cfd->GetLatestCFOptions().ilevel));
   InternalIterator* input = raw_input.get();
 
   IterKey start_ikey;
