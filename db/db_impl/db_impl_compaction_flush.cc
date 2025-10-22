@@ -79,7 +79,7 @@ std::tuple<unsigned long long, std::string> DBImpl::GetTreeState() {
     std::stringstream sorted_run_details;
     std::vector<SortedRun> sorted_runs_ = storage_info->LevelRuns(l);
     for (size_t run = 0; run < sorted_runs_.size(); run ++){
-      sorted_run_details << "\t\tSorted Run: "<< std::to_string(run)<<std::endl;
+      sorted_run_details << "\t\tSorted Run: "<< std::to_string(run + 1)<<std::endl;
       for (size_t files = 0; files < sorted_runs_[run].size(); files ++){
         table_reader = nullptr;
         handle = nullptr;
