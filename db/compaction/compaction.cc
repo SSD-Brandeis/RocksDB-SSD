@@ -77,14 +77,14 @@ void Compaction::FinalizeInputInfo(Version* _input_version) {
 void Compaction::GetBoundaryKeys(
     VersionStorageInfo* vstorage,
     const std::vector<CompactionInputFiles>& inputs, Slice* smallest_user_key,
-    Slice* largest_user_key, int exclude_level) {
+    Slice* largest_user_key, int exclude_level, int ilevel) {
   bool initialized = false;
   const Comparator* ucmp = vstorage->InternalComparator()->user_comparator();
   for (size_t i = 0; i < inputs.size(); ++i) {
     if (inputs[i].files.empty() || inputs[i].level == exclude_level) {
       continue;
     }
-    if (inputs[i].level == 0) {
+    if (inputs[i].level <= ilevel) {
       // we need to consider all files on level 0
       for (const auto* f : inputs[i].files) {
         const Slice& start_user_key = f->smallest.user_key();
@@ -118,14 +118,14 @@ void Compaction::GetBoundaryKeys(
 void Compaction::GetBoundaryInternalKeys(
     VersionStorageInfo* vstorage,
     const std::vector<CompactionInputFiles>& inputs, InternalKey* smallest_key,
-    InternalKey* largest_key, int exclude_level) {
+    InternalKey* largest_key, int exclude_level, int ilevel) {
   bool initialized = false;
   const InternalKeyComparator* icmp = vstorage->InternalComparator();
   for (size_t i = 0; i < inputs.size(); ++i) {
     if (inputs[i].files.empty() || inputs[i].level == exclude_level) {
       continue;
     }
-    if (inputs[i].level == 0) {
+    if (inputs[i].level <= ilevel) {
       // we need to consider all files on level 0
       for (const auto* f : inputs[i].files) {
         if (!initialized || icmp->Compare(f->smallest, *smallest_key) < 0) {
@@ -200,7 +200,7 @@ std::vector<CompactionInputFiles> Compaction::PopulateWithAtomicBoundaries(
 // bottommost level
 bool Compaction::IsBottommostLevel(
     int output_level, VersionStorageInfo* vstorage,
-    const std::vector<CompactionInputFiles>& inputs) {
+    const std::vector<CompactionInputFiles>& inputs, int ilevel) {
   int output_l0_idx;
   if (output_level == 0) {
     output_l0_idx = 0;
@@ -215,7 +215,7 @@ bool Compaction::IsBottommostLevel(
     output_l0_idx = -1;
   }
   Slice smallest_key, largest_key;
-  GetBoundaryKeys(vstorage, inputs, &smallest_key, &largest_key);
+  GetBoundaryKeys(vstorage, inputs, &smallest_key, &largest_key, -1, ilevel);
   return !vstorage->RangeMightExistAfterSortedRun(smallest_key, largest_key,
                                                   output_level, output_l0_idx);
 }
@@ -319,7 +319,7 @@ Compaction::Compaction(
           (_compaction_reason == CompactionReason::kExternalSstIngestion ||
            _compaction_reason == CompactionReason::kRefitLevel)
               ? false
-              : IsBottommostLevel(output_level_, vstorage, inputs_)),
+              : IsBottommostLevel(output_level_, vstorage, inputs_, mutable_cf_options_.ilevel)),
       is_full_compaction_(IsFullCompaction(vstorage, inputs_)),
       is_manual_compaction_(_manual_compaction),
       trim_ts_(_trim_ts),
@@ -384,7 +384,7 @@ Compaction::Compaction(
     }
   }
 
-  GetBoundaryKeys(vstorage, inputs_, &smallest_user_key_, &largest_user_key_);
+  GetBoundaryKeys(vstorage, inputs_, &smallest_user_key_, &largest_user_key_, mutable_cf_options_.ilevel);
 
   // Every compaction regardless of any compaction reason may respect the
   // existing compact cursor in the output level to split output files
@@ -454,7 +454,7 @@ void Compaction::PopulatePenultimateLevelOutputRange() {
   //  penultimate_level_largest_. No keys will be compacted up.
   GetBoundaryInternalKeys(input_vstorage_, inputs_,
                           &penultimate_level_smallest_,
-                          &penultimate_level_largest_, exclude_level);
+                          &penultimate_level_largest_, exclude_level, mutable_cf_options_.ilevel);
 
   if (penultimate_output_range_type_ !=
       PenultimateOutputRangeType::kFullRange) {
@@ -963,6 +963,8 @@ bool Compaction::ShouldFormSubcompactions() const {
     return (start_level_ == 0 || is_manual_compaction_) && output_level_ > 0;
   } else if (cfd_->ioptions().compaction_style == kCompactionStyleUniversal) {
     return number_levels_ > 1 && output_level_ > 0;
+  } else if (cfd_->ioptions().compaction_style == kCompactionStyleiLevel) {
+    return (start_level_ <= mutable_cf_options_.ilevel || is_manual_compaction_) && output_level_ > mutable_cf_options_.ilevel;
   } else {
     return false;
   }
