@@ -1493,7 +1493,8 @@ class VersionSet {
       RangeDelAggregator* range_del_agg,
       const FileOptions& file_options_compactions,
       const std::optional<const Slice>& start,
-      const std::optional<const Slice>& end);
+      const std::optional<const Slice>& end,
+      int ilevel);
 
   // Add all files listed in any live version to *live_table_files and
   // *live_blob_files. Note that these lists may contain duplicates.
