@@ -31,7 +31,7 @@
 
 namespace ROCKSDB_NAMESPACE {
 
-  std::string DBImpl::GetLevelsState() {
+std::string DBImpl::GetLevelsState() {
   std::stringstream all_level_details;
   all_level_details.str("");
 
@@ -72,15 +72,17 @@ std::tuple<unsigned long long, std::string> DBImpl::GetTreeState() {
     auto level_files_brief_ = storage_info->LevelFilesBrief(l);
     // auto num_files = storage_info->LevelFilesBrief(l).num_files;
     unsigned long long level_size_in_bytes = 0;
-    level_details << "\tLevel: " << std::to_string(l)<<std::endl;
+    level_details << "\tLevel: " << std::to_string(l) << std::endl;
 
     unsigned long long total_entries_in_one_level = 0;
-    std::stringstream level_sst_file_details;
+
     std::stringstream sorted_run_details;
     std::vector<SortedRun> sorted_runs_ = storage_info->LevelRuns(l);
-    for (size_t run = 0; run < sorted_runs_.size(); run ++){
-      sorted_run_details << "\t\tSorted Run: "<< std::to_string(run + 1)<<std::endl;
-      for (size_t files = 0; files < sorted_runs_[run].size(); files ++){
+    for (size_t run = 0; run < sorted_runs_.size(); run++) {
+      sorted_run_details << "\t\tSorted Run: " << std::to_string(run + 1)
+                         << std::endl;
+      std::stringstream level_sst_file_details;
+      for (size_t files = 0; files < sorted_runs_[run].size(); files++) {
         table_reader = nullptr;
         handle = nullptr;
         auto file_meta = sorted_runs_[run][files];
@@ -93,8 +95,7 @@ std::tuple<unsigned long long, std::string> DBImpl::GetTreeState() {
               MaxFileSizeForL0MetaPin(mutable_cf_options_);
           s = cfd->table_cache()->FindTable(
               read_options_, file_options_, cfd->internal_comparator(),
-              *file_meta, &(handle),
-              mutable_cf_options_,
+              *file_meta, &(handle), mutable_cf_options_,
               read_options_.read_tier == kBlockCacheTier /* no_io */,
               file_read_hist, false, l, true, max_file_size_for_l0_meta_pin_,
               file_meta->temperature);
@@ -114,16 +115,17 @@ std::tuple<unsigned long long, std::string> DBImpl::GetTreeState() {
             << std::to_string(file_meta->fd.file_size) << " ("
             << file_meta->smallest.user_key().ToString() << ", "
             << file_meta->largest.user_key().ToString() << ") "
-            << tp->num_entries << "], \n\t\t\t";
+            << tp->num_entries << " | " << file_meta->fd.smallest_seqno << ":"
+            << file_meta->fd.largest_seqno << "], \n\t\t\t";
       }
-      sorted_run_details << "\t\tFiles: \n\t\t\t" << level_sst_file_details.str() <<"\n";
+      sorted_run_details << "\t\tFiles: \n\t\t\t"
+                         << level_sst_file_details.str() << "\n";
     }
 
     total_entries_in_cfd += total_entries_in_one_level;
     level_details << "\t\tSize: " << level_size_in_bytes
                   << " bytes, Files Count: " << level_files_brief_.num_files
-                  << ", Entries Count: " << total_entries_in_one_level
-                  << "\n";
+                  << ", Entries Count: " << total_entries_in_one_level << "\n";
     all_level_details << level_details.str() << sorted_run_details.str()
                       << std::endl;
   }
