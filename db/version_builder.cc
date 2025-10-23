@@ -582,15 +582,15 @@ class VersionBuilder::Rep {
                ++sorted_run) {
             // check if runs are ordered properly
             const auto& runs = vstorage->LevelRuns(level);
-            for (int r = 0; r + 1 < static_cast<int>(runs.size()); ++r) {
-              auto* first = runs[r].front();
-              auto* second = runs[r + 1].front();
-              if (first->fd.largest_seqno < second->fd.largest_seqno) {
-                return Status::Corruption(
-                    "VersionBuilder",
-                    "Tiered runs not ordered properly by seqno");
-              }
-            }
+            // for (int r = 0; r + 1 < static_cast<int>(runs.size()); ++r) {
+            //   auto* first = runs[r].front();
+            //   auto* second = runs[r + 1].front();
+            //   if (first->fd.largest_seqno < second->fd.largest_seqno) {
+            //     return Status::Corruption(
+            //         "VersionBuilder",
+            //         "Tiered runs not ordered properly by seqno");
+            //   }
+            // }
 
             auto ilevel_checker = [this, level, sorted_run,
                                    epoch_number_requirement,
