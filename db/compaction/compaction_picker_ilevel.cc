@@ -331,7 +331,12 @@ bool ILevelCompactionBuilder::PickFileToCompact() {
     //  as we don't have to check the overlapping files on the next level
     return true;
   } else if (start_level_ == ilevel_) {
-    // FIXME (shubham) pick the oldest tier
+    // pick the oldest tier
+    SortedRun runs = vstorage_->LevelRuns(start_level_)[0];
+    for (FileMetaData* f : runs){
+      start_level_inputs_.files.push_back(f);
+    }
+    output_level_ = start_level_ + 1;
   } else {
     // pick a single file according to file picking policy
     const std::vector<int>& file_scores =
@@ -575,7 +580,7 @@ bool ILevelCompactionBuilder::SetupOtherInputsIfNeeded() {
   // Setup input files from output level. For output to L0 to level i, we only
   // compact spans of files that do not interact with any pending compactions,
   // so don't need to consider other levels.
-  if (output_level_ > ilevel_ + 1) {
+  if (output_level_ >= ilevel_ + 1) {
     output_level_inputs_.level = output_level_;
     bool round_robin_expanding =
         ioptions_.compaction_pri == kRoundRobin &&
