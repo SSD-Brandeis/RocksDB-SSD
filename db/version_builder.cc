@@ -996,6 +996,9 @@ class VersionBuilder::Rep {
       add_files.erase(add_it);
     }
 
+    // std::cout << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+    //           << " (deleting file #: " << file_number << ")" << std::endl
+    //           << std::flush;
     auto& del_files = level_state.deleted_files;
     assert(del_files.find(file_number) == del_files.end());
     del_files.emplace(file_number);
@@ -1143,6 +1146,9 @@ class VersionBuilder::Rep {
 
   // Apply all of the edits in *edit to the current state.
   Status Apply(const VersionEdit* edit) {
+    // std::cout << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+    //           << " (applying version edits)" << std::endl
+    //           << std::flush;
     bool version_updated = false;
     {
       const Status s = CheckConsistency(base_vstorage_);
@@ -1542,7 +1548,7 @@ class VersionBuilder::Rep {
     vstorage->Reserve(level, base_files.size() + unordered_added_files.size());
 
     AddNewelyAddedFilesWithBase(
-        base_files, base_runs, unordered_added_files, cmp,
+        base_files, base_runs, unordered_added_files, level, cmp,
         [&](FileMetaData* file) { MaybeAddFile(vstorage, level, file); },
         [&](const SortedRun& run) { MaybeAddRun(vstorage, level, run); });
     // (shubham)
@@ -1555,10 +1561,11 @@ class VersionBuilder::Rep {
   void AddNewelyAddedFilesWithBase(
       const std::vector<FileMetaData*>& base_files,
       const std::vector<SortedRun>& base_runs,
-      const std::unordered_map<uint64_t, FileMetaData*>& unordered_added_files,
+      const std::unordered_map<uint64_t, FileMetaData*>& unordered_added_files, int lvl,
       Cmp cmp, AddFileFunc add_file_func, AddRunFunc add_run_func) const {
     // Sort newly add files for the level
     std::vector<FileMetaData*> added_files;
+    int ilevel = cfd_->GetLatestMutableCFOptions().ilevel;
     added_files.reserve(unordered_added_files.size());
     for (const auto& pair : unordered_added_files) {
       added_files.push_back(pair.second);
@@ -1580,7 +1587,13 @@ class VersionBuilder::Rep {
 
     std::vector<SortedRun> merged_runs = base_runs;
     if (!added_files.empty()) {
-      merged_runs.push_back(added_files);
+      if (lvl <= ilevel || merged_runs.empty()) {
+        merged_runs.push_back(added_files);
+      } else {
+        for (const auto& ff : added_files) {
+          merged_runs[0].push_back(ff);
+        }
+      }
     }
 
     std::sort(merged_runs.begin(), merged_runs.end(),

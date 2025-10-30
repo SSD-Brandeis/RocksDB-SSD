@@ -1097,7 +1097,7 @@ struct AdvancedColumnFamilyOptions {
   bool paranoid_memory_checks = false;
 
   // Tree will follow tiered layout up until level i
-  int ilevel;
+  int ilevel = 0;
 
   bool dynamic_file_size;
 

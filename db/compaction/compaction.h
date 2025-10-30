@@ -473,14 +473,14 @@ class Compaction {
   static void GetBoundaryKeys(VersionStorageInfo* vstorage,
                               const std::vector<CompactionInputFiles>& inputs,
                               Slice* smallest_key, Slice* largest_key,
-                              int exclude_level = -1, int ilevel = 1);
+                              int exclude_level = -1, int ilevel = 0);
 
   // get the smallest and largest internal key present in files to be compacted
   static void GetBoundaryInternalKeys(
       VersionStorageInfo* vstorage,
       const std::vector<CompactionInputFiles>& inputs,
       InternalKey* smallest_key, InternalKey* largest_key,
-      int exclude_level = -1, int ilevel = 1);
+      int exclude_level = -1, int ilevel = 0);
 
   // populate penultimate level output range, which will be used to determine if
   // a key is safe to output to the penultimate level (details see

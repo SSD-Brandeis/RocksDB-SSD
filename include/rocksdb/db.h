@@ -2175,6 +2175,10 @@ class DB {
     return Status::NotSupported("Supported only by secondary instance");
   }
 
+  virtual void PrintFullTreeSummary() const {
+    // Must be inmplemented by child class
+  }
+
   virtual std::string GetLevelsState() {
     // Must be implemented by child class
     return "";

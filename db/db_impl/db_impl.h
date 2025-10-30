@@ -485,11 +485,8 @@ class DBImpl : public DB {
   Status LockWAL() override;
   Status UnlockWAL() override;
 
-
-  ReadOptions read_options_;
-  std::string GetLevelsState() override;
-
-  std::tuple<unsigned long long, std::string> GetTreeState() override;
+  // Get each level state to print
+  void PrintFullTreeSummary() const override;
 
   SequenceNumber GetLatestSequenceNumber() const override;
 

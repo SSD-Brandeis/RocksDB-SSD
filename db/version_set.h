@@ -572,6 +572,7 @@ class VersionStorageInfo {
   };
   const char* LevelSummary(LevelSummaryStorage* scratch) const;
   const char* RunsPerLevelSummary(LevelSummaryStorage* scratch) const;
+  void PrintFullTreeSummary() const;
   // Return a human-readable short (single-line) summary of files
   // in a specified level.  Uses *scratch as backing store.
   const char* LevelFileSummary(FileSummaryStorage* scratch, int level) const;
@@ -1493,8 +1494,7 @@ class VersionSet {
       RangeDelAggregator* range_del_agg,
       const FileOptions& file_options_compactions,
       const std::optional<const Slice>& start,
-      const std::optional<const Slice>& end,
-      int ilevel);
+      const std::optional<const Slice>& end);
 
   // Add all files listed in any live version to *live_table_files and
   // *live_blob_files. Note that these lists may contain duplicates.

@@ -13,6 +13,7 @@
 #include <array>
 #include <cinttypes>
 #include <cstdio>
+#include <iostream>
 #include <list>
 #include <map>
 #include <set>
@@ -4575,6 +4576,35 @@ const char* VersionStorageInfo::LevelSummary(
   return scratch->buffer;
 }
 
+void VersionStorageInfo::PrintFullTreeSummary() const {
+#ifdef PROFILE
+  std::cout << "\n==================== Level / Run / File Details ====================\n";
+
+  for (int i = 0; i < num_levels(); i++) {
+    std::cout << "Level #" << i
+              << " [# runs: " << LevelRuns(i).size() << "]" << std::endl;
+
+    int run_id = 0;
+    for (const auto& sr : LevelRuns(i)) {
+      std::cout << "\tRun #" << (++run_id)
+                << " [# files: " << sr.size() << "]" << std::endl;
+
+      for (const auto& fm : sr) {
+        std::cout << "\t\t[#"
+                  << fm->fd.GetNumber() << ":" << fm->fd.file_size
+                  << " (" << fm->smallest.user_key().ToString() << ", "
+                  << fm->largest.user_key().ToString() << ") "
+                  << fm->num_entries << " | " << fm->fd.smallest_seqno
+                  << ":" << fm->fd.largest_seqno << "]" << std::endl;
+      }
+    }
+  }
+
+  std::cout << "====================================================================\n"
+            << std::endl;
+#endif // PROFILE
+}
+
 const char* VersionStorageInfo::RunsPerLevelSummary(
     LevelSummaryStorage* scratch) const {
   int len = 0;
@@ -7136,9 +7166,9 @@ InternalIterator* VersionSet::MakeInputIterator(
     RangeDelAggregator* range_del_agg,
     const FileOptions& file_options_compactions,
     const std::optional<const Slice>& start,
-    const std::optional<const Slice>& end,
-    int ilevel) {
+    const std::optional<const Slice>& end) {
   auto cfd = c->column_family_data();
+  int ilevel = cfd->GetLatestMutableCFOptions().ilevel;
   // Level-0 files have to be merged together.  For other levels,
   // we will make a concatenating iterator per level.
   // TODO(opt): use concatenating iterator for level-0 if there is no overlap
