@@ -321,8 +321,7 @@ bool ILevelCompactionBuilder::PickFileToCompact() {
 
   if (start_level_ < ilevel_) {
     // if `start_level_` < ilevel, pick all the files.
-    for (int index = 0; index < static_cast<int>(level_files.size());
-         index++) {
+    for (int index = 0; index < static_cast<int>(level_files.size()); index++) {
       auto* f = level_files[index];
       start_level_inputs_.files.push_back(f);
     }
@@ -580,7 +579,7 @@ bool ILevelCompactionBuilder::SetupOtherInputsIfNeeded() {
   // Setup input files from output level. For output to L0 to level i, we only
   // compact spans of files that do not interact with any pending compactions,
   // so don't need to consider other levels.
-  if (output_level_ >= ilevel_ + 1) {
+  if (output_level_ > ilevel_) {
     output_level_inputs_.level = output_level_;
     bool round_robin_expanding =
         ioptions_.compaction_pri == kRoundRobin &&

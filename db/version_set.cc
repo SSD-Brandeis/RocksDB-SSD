@@ -2037,14 +2037,16 @@ void Version::AddIteratorsForLevel(const ReadOptions& read_options,
   if (level <= mutable_cf_options_.ilevel) {
     // Merge all level zero files together since they may overlap
     std::unique_ptr<TruncatedRangeDelIterator> tombstone_iter = nullptr;
-    for (size_t i = 0; i < storage_info_.LevelFilesBrief(level).num_files; i++) {
+    for (size_t i = 0; i < storage_info_.LevelFilesBrief(level).num_files;
+         i++) {
       const auto& file = storage_info_.LevelFilesBrief(level).files[i];
       auto table_iter = cfd_->table_cache()->NewIterator(
           read_options, soptions, cfd_->internal_comparator(),
           *file.file_metadata, /*range_del_agg=*/nullptr, mutable_cf_options_,
           nullptr, cfd_->internal_stats()->GetFileReadHist(level),
           TableReaderCaller::kUserIterator, arena,
-          /*skip_filters=*/false, /*level=*/level, max_file_size_for_l0_meta_pin_,
+          /*skip_filters=*/false, /*level=*/level,
+          max_file_size_for_l0_meta_pin_,
           /*smallest_compaction_key=*/nullptr,
           /*largest_compaction_key=*/nullptr, allow_unprepared_value,
           /*range_del_read_seqno=*/nullptr, &tombstone_iter);
@@ -2106,7 +2108,8 @@ Status Version::OverlapWithLevelIterator(const ReadOptions& read_options,
   *overlap = false;
 
   if (level <= mutable_cf_options_.ilevel) {
-    for (size_t i = 0; i < storage_info_.LevelFilesBrief(level).num_files; i++) {
+    for (size_t i = 0; i < storage_info_.LevelFilesBrief(level).num_files;
+         i++) {
       const auto file = &storage_info_.LevelFilesBrief(level).files[i];
       if (AfterFile(ucmp, &smallest_user_key, file) ||
           BeforeFile(ucmp, &largest_user_key, file)) {
@@ -2117,7 +2120,8 @@ Status Version::OverlapWithLevelIterator(const ReadOptions& read_options,
           *file->file_metadata, &range_del_agg, mutable_cf_options_, nullptr,
           cfd_->internal_stats()->GetFileReadHist(level),
           TableReaderCaller::kUserIterator, &arena,
-          /*skip_filters=*/false, /*level=*/level, max_file_size_for_l0_meta_pin_,
+          /*skip_filters=*/false, /*level=*/level,
+          max_file_size_for_l0_meta_pin_,
           /*smallest_compaction_key=*/nullptr,
           /*largest_compaction_key=*/nullptr,
           /*allow_unprepared_value=*/false));
@@ -4578,31 +4582,32 @@ const char* VersionStorageInfo::LevelSummary(
 
 void VersionStorageInfo::PrintFullTreeSummary() const {
 #ifdef PROFILE
-  std::cout << "\n==================== Level / Run / File Details ====================\n";
+  std::cout << "\n==================== Level / Run / File Details "
+               "====================\n";
 
   for (int i = 0; i < num_levels(); i++) {
-    std::cout << "Level #" << i
-              << " [# runs: " << LevelRuns(i).size() << "]" << std::endl;
+    std::cout << "Level #" << i << " [# runs: " << LevelRuns(i).size() << "]"
+              << std::endl;
 
     int run_id = 0;
     for (const auto& sr : LevelRuns(i)) {
-      std::cout << "\tRun #" << (++run_id)
-                << " [# files: " << sr.size() << "]" << std::endl;
+      std::cout << "\tRun #" << (++run_id) << " [# files: " << sr.size() << "]"
+                << std::endl;
 
       for (const auto& fm : sr) {
-        std::cout << "\t\t[#"
-                  << fm->fd.GetNumber() << ":" << fm->fd.file_size
+        std::cout << "\t\t[#" << fm->fd.GetNumber() << ":" << fm->fd.file_size
                   << " (" << fm->smallest.user_key().ToString() << ", "
                   << fm->largest.user_key().ToString() << ") "
-                  << fm->num_entries << " | " << fm->fd.smallest_seqno
-                  << ":" << fm->fd.largest_seqno << "]" << std::endl;
+                  << fm->num_entries << " | " << fm->fd.smallest_seqno << ":"
+                  << fm->fd.largest_seqno << "]" << std::endl;
       }
     }
   }
 
-  std::cout << "====================================================================\n"
+  std::cout << "==============================================================="
+               "=====\n"
             << std::endl;
-#endif // PROFILE
+#endif  // PROFILE
 }
 
 const char* VersionStorageInfo::RunsPerLevelSummary(
@@ -7173,8 +7178,8 @@ InternalIterator* VersionSet::MakeInputIterator(
   // we will make a concatenating iterator per level.
   // TODO(opt): use concatenating iterator for level-0 if there is no overlap
   const size_t space = (c->level() <= ilevel ? c->input_levels(0)->num_files +
-                                              c->num_input_levels() - 1
-                                        : c->num_input_levels());
+                                                   c->num_input_levels() - 1
+                                             : c->num_input_levels());
   InternalIterator** list = new InternalIterator*[space];
   // First item in the pair is a pointer to range tombstones.
   // Second item is a pointer to a member of a LevelIterator,

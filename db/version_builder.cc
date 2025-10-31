@@ -1495,22 +1495,20 @@ class VersionBuilder::Rep {
   }
 
   void MaybeAddRun(VersionStorageInfo* vstorage, int level,
-                   const SortedRun& run) const {
+                   SortedRun run) const {
     const auto& level_state = levels_[level];
-
     const auto& del_files = level_state.deleted_files;
-    bool seen_undeleted_file = false;
 
-    for (int idx = 0; idx < static_cast<int>(run.size()); idx++) {
-      const uint64_t file_number = run[idx]->fd.GetNumber();
-      const auto del_it = del_files.find(file_number);
-      if (del_it == del_files.end()) {
-        seen_undeleted_file = true;
-        break;
-      }
-    }
+    run.erase(std::remove_if(run.begin(), run.end(),
+                             [&](FileMetaData* f) {
+                               const uint64_t file_number = f->fd.GetNumber();
+                               // Keep if NOT in delete list
+                               return del_files.find(file_number) !=
+                                      del_files.end();
+                             }),
+              run.end());
 
-    if (seen_undeleted_file) {
+    if (!run.empty()) {
       vstorage->AddRun(level, run);
     }
   }
@@ -1550,7 +1548,7 @@ class VersionBuilder::Rep {
     AddNewelyAddedFilesWithBase(
         base_files, base_runs, unordered_added_files, level, cmp,
         [&](FileMetaData* file) { MaybeAddFile(vstorage, level, file); },
-        [&](const SortedRun& run) { MaybeAddRun(vstorage, level, run); });
+        [&](SortedRun run) { MaybeAddRun(vstorage, level, std::move(run)); });
     // (shubham)
     // MergeUnorderdAddedFilesWithBase(
     //     base_files, unordered_added_files, cmp,
@@ -1561,8 +1559,9 @@ class VersionBuilder::Rep {
   void AddNewelyAddedFilesWithBase(
       const std::vector<FileMetaData*>& base_files,
       const std::vector<SortedRun>& base_runs,
-      const std::unordered_map<uint64_t, FileMetaData*>& unordered_added_files, int lvl,
-      Cmp cmp, AddFileFunc add_file_func, AddRunFunc add_run_func) const {
+      const std::unordered_map<uint64_t, FileMetaData*>& unordered_added_files,
+      int lvl, Cmp cmp, AddFileFunc add_file_func,
+      AddRunFunc add_run_func) const {
     // Sort newly add files for the level
     std::vector<FileMetaData*> added_files;
     int ilevel = cfd_->GetLatestMutableCFOptions().ilevel;
@@ -1587,22 +1586,29 @@ class VersionBuilder::Rep {
 
     std::vector<SortedRun> merged_runs = base_runs;
     if (!added_files.empty()) {
-      if (lvl <= ilevel || merged_runs.empty()) {
-        merged_runs.push_back(added_files);
-      } else {
-        for (const auto& ff : added_files) {
-          merged_runs[0].push_back(ff);
-        }
-      }
+      merged_runs.push_back(added_files);
     }
-
+    merged_runs.erase(
+        std::remove_if(merged_runs.begin(), merged_runs.end(),
+                       [](const SortedRun& r) { return r.empty(); }),
+        merged_runs.end());
     std::sort(merged_runs.begin(), merged_runs.end(),
               [&](const SortedRun& r1, const SortedRun& r2) {
                 assert(!r1.empty() && !r2.empty());
                 return cmp(r1.front(), r2.front());
               });
-    for (const auto& run : merged_runs) {
-      add_run_func(run);
+    if (lvl <= ilevel) {
+      for (const auto& run : merged_runs) {
+        add_run_func(run);
+      }
+    } else {
+      SortedRun all_files;
+      for (const auto& run : merged_runs) {
+        for (const auto& fm : run) {
+          all_files.push_back(fm);
+        }
+      }
+      add_run_func(all_files);
     }
   }
 
