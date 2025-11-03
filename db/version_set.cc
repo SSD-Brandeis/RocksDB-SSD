@@ -1576,7 +1576,7 @@ void LevelIterator::InitFileIterator(size_t new_file_index) {
 
 void Version::PrintFullTreeSummary() {
 #ifdef PROFILE
-  std::cout << "\n========= LSM-tree state =========\n";
+  std::cout << "\n====================== LSM-tree state =======================\n";
 
   for (int i = 0; i < storage_info_.num_levels(); i++) {
     std::cout << "Level #" << i
