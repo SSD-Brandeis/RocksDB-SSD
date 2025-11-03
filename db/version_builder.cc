@@ -574,6 +574,9 @@ class VersionBuilder::Rep {
           vstorage->GetEpochNumberRequirement();
       assert(icmp);
       // Check L0 till iLevel
+      // [FIXME] (shubham) the check that we make for different levels and
+      // different run in single level are not consistent based on RockDB level
+      // 0 implementation
       {
         for (int level = 0; level <= cfd_->GetLatestMutableCFOptions().ilevel;
              ++level) {
