@@ -384,7 +384,7 @@ Compaction::Compaction(
     }
   }
 
-  GetBoundaryKeys(vstorage, inputs_, &smallest_user_key_, &largest_user_key_, mutable_cf_options_.ilevel);
+  GetBoundaryKeys(vstorage, inputs_, &smallest_user_key_, &largest_user_key_, -1, mutable_cf_options_.ilevel);
 
   // Every compaction regardless of any compaction reason may respect the
   // existing compact cursor in the output level to split output files
@@ -963,8 +963,6 @@ bool Compaction::ShouldFormSubcompactions() const {
     return (start_level_ == 0 || is_manual_compaction_) && output_level_ > 0;
   } else if (cfd_->ioptions().compaction_style == kCompactionStyleUniversal) {
     return number_levels_ > 1 && output_level_ > 0;
-  } else if (cfd_->ioptions().compaction_style == kCompactionStyleiLevel) {
-    return (start_level_ <= mutable_cf_options_.ilevel || is_manual_compaction_) && output_level_ > mutable_cf_options_.ilevel;
   } else {
     return false;
   }

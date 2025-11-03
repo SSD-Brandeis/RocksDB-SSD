@@ -506,7 +506,7 @@ class Compaction {
   // bottommost
   static bool IsBottommostLevel(
       int output_level, VersionStorageInfo* vstorage,
-      const std::vector<CompactionInputFiles>& inputs, int ilevel = 1);
+      const std::vector<CompactionInputFiles>& inputs, int ilevel = 0);
 
   static bool IsFullCompaction(VersionStorageInfo* vstorage,
                                const std::vector<CompactionInputFiles>& inputs);

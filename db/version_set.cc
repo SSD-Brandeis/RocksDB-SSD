@@ -1574,6 +1574,61 @@ void LevelIterator::InitFileIterator(size_t new_file_index) {
 }
 }  // anonymous namespace
 
+void Version::PrintFullTreeSummary() {
+#ifdef PROFILE
+  std::cout << "\n========= Level / Run / File Details =========\n";
+
+  for (int i = 0; i < storage_info_.num_levels(); i++) {
+    std::cout << "Level #" << i
+              << " [# runs: " << storage_info_.LevelRuns(i).size() << "]"
+              << std::endl;
+
+    int run_id = 0;
+    for (const auto& sr : storage_info_.LevelRuns(i)) {
+      std::cout << "\tRun #" << (++run_id) << " [# files: " << sr.size() << "]"
+                << std::endl;
+
+      for (const auto& fm : sr) {
+        if (fm->num_entries == 0) {
+          const ReadOptions read_options;
+          const auto& ioptions = cfd_->ioptions();
+
+          std::string file_name = TableFileName(
+              ioptions.cf_paths, fm->fd.GetNumber(), fm->fd.GetPathId());
+
+          std::unique_ptr<FSRandomAccessFile> file;
+          Status s = ioptions.fs->NewRandomAccessFile(file_name, file_options_,
+                                                      &file, nullptr);
+          assert(s.ok());
+          auto file_reader = std::make_unique<RandomAccessFileReader>(
+              std::move(file), file_name, ioptions.clock, io_tracer_,
+              ioptions.stats, Histograms::SST_READ_MICROS, nullptr, nullptr,
+              ioptions.listeners);
+
+          std::unique_ptr<TableProperties> props;
+          s = ReadTableProperties(
+              file_reader.get(), fm->fd.GetFileSize(),
+              Footer::kNullTableMagicNumber /* table's magic number */,
+              ioptions, read_options, &props);
+
+          assert(s.ok());
+
+          fm->num_entries = props->num_entries;
+        }
+        std::cout << "\t\t[#" << fm->fd.GetNumber() << ":" << fm->fd.file_size
+                  << " (" << fm->smallest.user_key().ToString() << ", "
+                  << fm->largest.user_key().ToString() << ") "
+                  << fm->num_entries << " | " << fm->fd.smallest_seqno << ":"
+                  << fm->fd.largest_seqno << "]" << std::endl;
+      }
+    }
+  }
+
+  std::cout << "=============================================================\n"
+            << std::endl;
+#endif  // PROFILE
+}
+
 Status Version::GetTableProperties(const ReadOptions& read_options,
                                    std::shared_ptr<const TableProperties>* tp,
                                    const FileMetaData* file_meta,
@@ -4578,36 +4633,6 @@ const char* VersionStorageInfo::LevelSummary(
   }
 
   return scratch->buffer;
-}
-
-void VersionStorageInfo::PrintFullTreeSummary() const {
-#ifdef PROFILE
-  std::cout << "\n==================== Level / Run / File Details "
-               "====================\n";
-
-  for (int i = 0; i < num_levels(); i++) {
-    std::cout << "Level #" << i << " [# runs: " << LevelRuns(i).size() << "]"
-              << std::endl;
-
-    int run_id = 0;
-    for (const auto& sr : LevelRuns(i)) {
-      std::cout << "\tRun #" << (++run_id) << " [# files: " << sr.size() << "]"
-                << std::endl;
-
-      for (const auto& fm : sr) {
-        std::cout << "\t\t[#" << fm->fd.GetNumber() << ":" << fm->fd.file_size
-                  << " (" << fm->smallest.user_key().ToString() << ", "
-                  << fm->largest.user_key().ToString() << ") "
-                  << fm->num_entries << " | " << fm->fd.smallest_seqno << ":"
-                  << fm->fd.largest_seqno << "]" << std::endl;
-      }
-    }
-  }
-
-  std::cout << "==============================================================="
-               "=====\n"
-            << std::endl;
-#endif  // PROFILE
 }
 
 const char* VersionStorageInfo::RunsPerLevelSummary(

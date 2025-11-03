@@ -32,12 +32,11 @@
 namespace ROCKSDB_NAMESPACE {
 
 void DBImpl::PrintFullTreeSummary() const {
-  auto cfh = static_cast_with_check<ColumnFamilyHandleImpl>(DefaultColumnFamily());
-  ColumnFamilyData* cfd = cfh->cfd();
-  auto storage_info = cfd->current()->storage_info();
-  storage_info->PrintFullTreeSummary();
+  versions_->GetColumnFamilySet()
+      ->GetDefault()
+      ->current()
+      ->PrintFullTreeSummary();
 }
-
 
 bool DBImpl::EnoughRoomForCompaction(
     ColumnFamilyData* cfd, const std::vector<CompactionInputFiles>& inputs,

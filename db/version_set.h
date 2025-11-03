@@ -572,7 +572,6 @@ class VersionStorageInfo {
   };
   const char* LevelSummary(LevelSummaryStorage* scratch) const;
   const char* RunsPerLevelSummary(LevelSummaryStorage* scratch) const;
-  void PrintFullTreeSummary() const;
   // Return a human-readable short (single-line) summary of files
   // in a specified level.  Uses *scratch as backing store.
   const char* LevelFileSummary(FileSummaryStorage* scratch, int level) const;
@@ -1071,6 +1070,8 @@ class Version {
   InternalIterator* TEST_GetLevelIterator(
       const ReadOptions& read_options, MergeIteratorBuilder* merge_iter_builder,
       int level, bool allow_unprepared_value);
+  
+  void PrintFullTreeSummary();
 
  private:
   Env* env_;
