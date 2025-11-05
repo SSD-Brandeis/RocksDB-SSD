@@ -132,6 +132,7 @@ struct MutableCFOptions {
         target_file_size_multiplier(options.target_file_size_multiplier),
         max_bytes_for_level_base(options.max_bytes_for_level_base),
         max_bytes_for_level_multiplier(options.max_bytes_for_level_multiplier),
+        size_ratio(options.size_ratio),
         ttl(options.ttl),
         periodic_compaction_seconds(options.periodic_compaction_seconds),
         max_bytes_for_level_multiplier_additional(
@@ -175,6 +176,7 @@ struct MutableCFOptions {
             options.bottommost_file_compaction_delay),
         uncache_aggressiveness(options.uncache_aggressiveness),
         ilevel(options.ilevel),
+        leveli_file_num_compaction_trigger(options.leveli_file_num_compaction_trigger),
         dynamic_file_size(options.dynamic_file_size) {
     RefreshDerivedOptions(options.num_levels, options.compaction_style);
   }
@@ -202,6 +204,7 @@ struct MutableCFOptions {
         target_file_size_multiplier(0),
         max_bytes_for_level_base(0),
         max_bytes_for_level_multiplier(0),
+        size_ratio(std::vector<double>()),
         ttl(0),
         periodic_compaction_seconds(0),
         compaction_options_fifo(),
@@ -232,6 +235,7 @@ struct MutableCFOptions {
         bottommost_file_compaction_delay(0),
         uncache_aggressiveness(0),
         ilevel(0),
+        leveli_file_num_compaction_trigger(std::vector<int>(20, max_bytes_for_level_multiplier)), //TODO: figure out how to put max_level here
         dynamic_file_size(false) {}
 
   explicit MutableCFOptions(const Options& options);
@@ -301,6 +305,7 @@ struct MutableCFOptions {
   int target_file_size_multiplier;
   uint64_t max_bytes_for_level_base;
   double max_bytes_for_level_multiplier;
+  std::vector<double> size_ratio;
   uint64_t ttl;
   uint64_t periodic_compaction_seconds;
   std::vector<int> max_bytes_for_level_multiplier_additional;
@@ -342,6 +347,7 @@ struct MutableCFOptions {
   uint32_t uncache_aggressiveness;
 
   int ilevel;
+  std::vector<int> leveli_file_num_compaction_trigger;
   bool dynamic_file_size;
   // Derived options
   // Per-level target file size.

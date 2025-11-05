@@ -559,6 +559,8 @@ struct AdvancedColumnFamilyOptions {
   // Dynamically changeable through SetOptions() API
   double max_bytes_for_level_multiplier = 10;
 
+
+  std::vector<double> size_ratio = std::vector<double>();
   // Different max-size multipliers for different levels.
   // These are multiplied by max_bytes_for_level_multiplier to arrive
   // at the max-size of each level.
@@ -1098,6 +1100,8 @@ struct AdvancedColumnFamilyOptions {
 
   // Tree will follow tiered layout up until level i
   int ilevel = 0;
+
+  std::vector<int> leveli_file_num_compaction_trigger = std::vector<int>(num_levels, max_bytes_for_level_multiplier);
 
   bool dynamic_file_size;
 

@@ -197,10 +197,10 @@ uint32_t ILevelCompactionBuilder::GetPathId(
             // Still, adding this check to avoid accidentally using
             // max_bytes_for_level_multiplier_additional
             level_size = static_cast<uint64_t>(
-                level_size * mutable_cf_options.max_bytes_for_level_multiplier);
+                level_size * mutable_cf_options.size_ratio[cur_level]);
           } else {
             level_size = static_cast<uint64_t>(
-                level_size * mutable_cf_options.max_bytes_for_level_multiplier *
+                level_size * mutable_cf_options.size_ratio[cur_level] *
                 mutable_cf_options.MaxBytesMultiplerAdditional(cur_level));
           }
         }

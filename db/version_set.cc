@@ -3355,7 +3355,7 @@ void VersionStorageInfo::EstimateCompactionBytesNeeded(
   // Level 0
   bool level0_compact_triggered = false;
   if (static_cast<int>(files_[0].size()) >=
-          mutable_cf_options.level0_file_num_compaction_trigger ||
+          mutable_cf_options.leveli_file_num_compaction_trigger[0] ||
       level_size >= mutable_cf_options.max_bytes_for_level_base) {
     level0_compact_triggered = true;
     estimated_compaction_needed_bytes_ = level_size;
@@ -3547,7 +3547,7 @@ void VersionStorageInfo::ComputeCompactionScore(
             mutable_cf_options.compaction_options_fifo.allow_compaction) {
           score = std::max(
               static_cast<double>(num_sorted_runs) /
-                  mutable_cf_options.level0_file_num_compaction_trigger,
+                  mutable_cf_options.leveli_file_num_compaction_trigger[level],
               score);
         }
         if (score < 1 && mutable_cf_options.ttl > 0) {
@@ -3569,10 +3569,10 @@ void VersionStorageInfo::ComputeCompactionScore(
         // `level0_file_num_compaction_trigger` is used as a trigger to check
         // if there is any compaction work to do.
         score = static_cast<double>(num_sorted_runs) /
-                mutable_cf_options.level0_file_num_compaction_trigger;
+                mutable_cf_options.leveli_file_num_compaction_trigger[level];
         if (compaction_style_ == kCompactionStyleiLevel) {
           score = static_cast<double>(sorted_runs_per_level_[level].size()) /
-                  mutable_cf_options.level0_file_num_compaction_trigger;
+                  mutable_cf_options.leveli_file_num_compaction_trigger[level];
         } else if (compaction_style_ == kCompactionStyleLevel &&
                    num_levels() > 1) {
           // Level-based involves L0->L0 compactions that can lead to oversized
@@ -4826,7 +4826,7 @@ void VersionStorageInfo::CalculateBaseBytes(const ImmutableOptions& ioptions,
       } else if (i > 1) {
         level_max_bytes_[i] = MultiplyCheckOverflow(
             MultiplyCheckOverflow(level_max_bytes_[i - 1],
-                                  options.max_bytes_for_level_multiplier),
+                                  options.size_ratio[i]),
             options.MaxBytesMultiplerAdditional(i - 1));
       } else {
         level_max_bytes_[i] = options.max_bytes_for_level_base;
@@ -4866,15 +4866,21 @@ void VersionStorageInfo::CalculateBaseBytes(const ImmutableOptions& ioptions,
     } else {
       assert(first_non_empty_level >= 1);
       uint64_t base_bytes_max = options.max_bytes_for_level_base;
+      double smallest = 0;
+      for (int i = 0; i < num_levels_; i++){
+        if (options.size_ratio[i] < smallest){
+          smallest = options.size_ratio[i];
+        }
+      }
       uint64_t base_bytes_min = static_cast<uint64_t>(
-          base_bytes_max / options.max_bytes_for_level_multiplier);
+          base_bytes_max / smallest);
 
       // Try whether we can make last level's target size to be max_level_size
       uint64_t cur_level_size = max_level_size;
       for (int i = num_levels_ - 2; i >= first_non_empty_level; i--) {
         // Round up after dividing
         cur_level_size = static_cast<uint64_t>(
-            cur_level_size / options.max_bytes_for_level_multiplier);
+            cur_level_size / options.size_ratio[i]);
         if (lowest_unnecessary_level_ == -1 &&
             cur_level_size <= base_bytes_min &&
             (options.preclude_last_level_data_seconds == 0 ||
@@ -4915,7 +4921,7 @@ void VersionStorageInfo::CalculateBaseBytes(const ImmutableOptions& ioptions,
         while (base_level_ > 1 && cur_level_size > base_bytes_max) {
           --base_level_;
           cur_level_size = static_cast<uint64_t>(
-              cur_level_size / options.max_bytes_for_level_multiplier);
+              cur_level_size / options.size_ratio[base_level_]);
         }
         if (cur_level_size > base_bytes_max) {
           // Even L1 will be too large
@@ -4926,13 +4932,13 @@ void VersionStorageInfo::CalculateBaseBytes(const ImmutableOptions& ioptions,
         }
       }
 
-      level_multiplier_ = options.max_bytes_for_level_multiplier;
+      // level_multiplier_ = options.max_bytes_for_level_multiplier;
       assert(base_level_size > 0);
 
       uint64_t level_size = base_level_size;
       for (int i = base_level_; i < num_levels_; i++) {
         if (i > base_level_) {
-          level_size = MultiplyCheckOverflow(level_size, level_multiplier_);
+          level_size = MultiplyCheckOverflow(level_size, options.size_ratio[i]);
         }
         // Don't set any level below base_bytes_max. Otherwise, the LSM can
         // assume an hourglass shape where L1+ sizes are smaller than L0. This

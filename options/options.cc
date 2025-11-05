@@ -68,6 +68,7 @@ AdvancedColumnFamilyOptions::AdvancedColumnFamilyOptions(const Options& options)
       level_compaction_dynamic_level_bytes(
           options.level_compaction_dynamic_level_bytes),
       max_bytes_for_level_multiplier(options.max_bytes_for_level_multiplier),
+      size_ratio(options.size_ratio),
       max_bytes_for_level_multiplier_additional(
           options.max_bytes_for_level_multiplier_additional),
       max_compaction_bytes(options.max_compaction_bytes),
