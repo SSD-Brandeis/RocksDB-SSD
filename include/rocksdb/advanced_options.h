@@ -17,6 +17,7 @@
 
 namespace ROCKSDB_NAMESPACE {
 
+class CompactionRunPolicy;
 class Slice;
 class SliceTransform;
 class TablePropertiesCollectorFactory;
@@ -1098,6 +1099,10 @@ struct AdvancedColumnFamilyOptions {
 
   // Tree will follow tiered layout up until level i
   int ilevel = 0;
+
+  // Compaction run policy defined the number of tiers/files
+  //  a single compaction can pick from a specific level
+  std::shared_ptr<const CompactionRunPolicy> compaction_run_policy = nullptr;
 
   bool dynamic_file_size;
 
