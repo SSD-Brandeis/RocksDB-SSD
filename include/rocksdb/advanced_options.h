@@ -17,6 +17,8 @@
 
 namespace ROCKSDB_NAMESPACE {
 
+class SizeRatioPolicy;
+class CompactionILevelNumFileTriggerPolicy;
 class CompactionRunPolicy;
 class Slice;
 class SliceTransform;
@@ -561,7 +563,7 @@ struct AdvancedColumnFamilyOptions {
   double max_bytes_for_level_multiplier = 10;
 
 
-  std::vector<double> size_ratio = std::vector<double>();
+  std::shared_ptr<const SizeRatioPolicy> size_ratio = nullptr;
   // Different max-size multipliers for different levels.
   // These are multiplied by max_bytes_for_level_multiplier to arrive
   // at the max-size of each level.
@@ -1103,11 +1105,11 @@ struct AdvancedColumnFamilyOptions {
   int ilevel = 0;
   bool dynamic_file_size;
 
+  std::shared_ptr<const CompactionILevelNumFileTriggerPolicy> leveli_file_num_compaction_trigger = nullptr;
+
   // Compaction run policy defined the number of tiers/files
   //  a single compaction can pick from a specific level
   std::shared_ptr<const CompactionRunPolicy> compaction_run_policy = nullptr;
-
-  std::vector<int> leveli_file_num_compaction_trigger = std::vector<int>(num_levels, max_bytes_for_level_multiplier);
 
   // Create ColumnFamilyOptions with default values for all fields
   AdvancedColumnFamilyOptions();

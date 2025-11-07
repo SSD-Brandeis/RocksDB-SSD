@@ -4,6 +4,8 @@
 #include <utility>
 #include <vector>
 
+#include "db/num_file_compact_trigger_ilevel_policy.h"
+#include "db/tree_structure_ilevel_policy.h"
 #include "compaction_ilevel_run_policy.h"
 #include "db/version_edit.h"
 #include "logging/log_buffer.h"
@@ -203,10 +205,10 @@ uint32_t ILevelCompactionBuilder::GetPathId(
             // Still, adding this check to avoid accidentally using
             // max_bytes_for_level_multiplier_additional
             level_size = static_cast<uint64_t>(
-                level_size * mutable_cf_options.size_ratio[cur_level]);
+                level_size * mutable_cf_options.size_ratio->SizeRatio(cur_level));
           } else {
             level_size = static_cast<uint64_t>(
-                level_size * mutable_cf_options.size_ratio[cur_level] *
+                level_size * mutable_cf_options.size_ratio->SizeRatio(cur_level) *
                 mutable_cf_options.MaxBytesMultiplerAdditional(cur_level));
           }
         }
@@ -734,5 +736,28 @@ CompactionILevelRunPolicy::CompactionILevelRunPolicy(
       policy_per_level_[lvl] = policy_per_level[lvl];
     }
   }
+}
+
+
+ILevelSizeRatioPolicy::ILevelSizeRatioPolicy(
+    std::vector<double> ratio_per_level, int num_levels, int default_ratio) {
+  for (int i = 0; i < num_levels; i++){
+      if (i <= static_cast<int>(ratio_per_level.size())){
+        size_ratio_.push_back(ratio_per_level[i]);
+      } else {
+        size_ratio_.push_back(default_ratio);
+      }
+    }
+}
+
+ILevelNumFileCompactTriggerPolicy::ILevelNumFileCompactTriggerPolicy(
+    std::vector<double> ratio_per_level, int ilevel, int default_ratio) {
+  for (int i = 0; i <= ilevel; i++){
+      if (i <= static_cast<int>(ratio_per_level.size())){
+        NumFileTrigger_.push_back(static_cast<int>(ratio_per_level[i]));
+      } else {
+        NumFileTrigger_.push_back(default_ratio);
+      }
+    }
 }
 }  // namespace ROCKSDB_NAMESPACE
