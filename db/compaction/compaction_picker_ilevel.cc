@@ -4,6 +4,7 @@
 #include <utility>
 #include <vector>
 
+#include "compaction_ilevel_run_policy.h"
 #include "db/version_edit.h"
 #include "logging/log_buffer.h"
 #include "test_util/sync_point.h"
@@ -61,7 +62,8 @@ class ILevelCompactionBuilder {
         mutable_cf_options_(mutable_cf_options),
         ioptions_(ioptions),
         mutable_db_options_(mutable_db_options),
-        ilevel_(mutable_cf_options.ilevel) {}
+        ilevel_(mutable_cf_options.ilevel),
+        compaction_run_policy_(mutable_cf_options.compaction_run_policy) {}
 
   // Pick and return a compaction.
   Compaction* PickCompaction();
@@ -90,7 +92,7 @@ class ILevelCompactionBuilder {
   //    - exactly one file in case of start_level_ > ilevel
   // If level is between [0, ilevel] and there is already a compaction on that
   // level, this function will return false.
-  bool PickFileToCompact();
+  bool PickRunsToCompact();
 
   // // Return true if a L0 trivial move is picked up.
   // bool TryPickL0TrivialMove();
@@ -127,7 +129,7 @@ class ILevelCompactionBuilder {
   // // level. If compact_to_next_level is true, compact the file to the next
   // // level, otherwise, compact to the same level as the input file.
   // // If skip_last_level is true, skip the last level.
-  // void PickFileToCompact(
+  // void PickRunsToCompact(
   //     const autovector<std::pair<int, FileMetaData*>>& level_files,
   //     CompactToNextLevel compact_to_next_level);
 
@@ -158,6 +160,10 @@ class ILevelCompactionBuilder {
 
   // static const int kMinFilesForIntraL0Compaction = 4;
   int ilevel_ = 0;
+
+  // Compaction run picker, which decides how many tiers/files a
+  // single compaction can pick from a specific level
+  std::shared_ptr<const CompactionRunPolicy> compaction_run_policy_;
 };
 
 /*
@@ -301,7 +307,7 @@ bool ILevelCompactionBuilder::TryExtendNoniLTrivialMove(
   return false;
 }
 
-bool ILevelCompactionBuilder::PickFileToCompact() {
+bool ILevelCompactionBuilder::PickRunsToCompact() {
   // From 0 to ilevel files are overlapping. So we cannot pick more
   // than one concurrent compactions at these levels.
   if (start_level_ <= ilevel_ &&
@@ -316,27 +322,27 @@ bool ILevelCompactionBuilder::PickFileToCompact() {
 
   assert(start_level_ >= 0);
 
-  const std::vector<FileMetaData*>& level_files =
-      vstorage_->LevelFiles(start_level_);
-
-  if (start_level_ < ilevel_) {
+  if (start_level_ <= ilevel_) {
     // if `start_level_` < ilevel, pick all the files.
-    for (int index = 0; index < static_cast<int>(level_files.size()); index++) {
-      auto* f = level_files[index];
-      start_level_inputs_.files.push_back(f);
+    const std::vector<SortedRun>& level_runs =
+        vstorage_->LevelRuns(start_level_);
+    int num_runs = compaction_run_policy_->PickCompactionCount(start_level_);
+    for (int index = static_cast<int>(level_runs.size()) - 1;
+         index >= 0 && num_runs > 0; index--) {
+      SortedRun run = level_runs[index];
+      for (int idx = 0; idx < static_cast<int>(run.size()); idx++) {
+        auto* f = run[idx];
+        start_level_inputs_.files.push_back(f);
+      }
+      num_runs--;
     }
     output_level_ = start_level_ + 1;
     // Since this is a tiering implementation, we can return true here
     //  as we don't have to check the overlapping files on the next level
     return true;
-  } else if (start_level_ == ilevel_) {
-    // pick the oldest tier
-    SortedRun runs = vstorage_->LevelRuns(start_level_)[0];
-    for (FileMetaData* f : runs){
-      start_level_inputs_.files.push_back(f);
-    }
-    output_level_ = start_level_ + 1;
   } else {
+    const std::vector<FileMetaData*>& level_files =
+        vstorage_->LevelFiles(start_level_);
     // pick a single file according to file picking policy
     const std::vector<int>& file_scores =
         vstorage_->FilesByCompactionPri(start_level_);
@@ -355,13 +361,16 @@ bool ILevelCompactionBuilder::PickFileToCompact() {
       }
 
       start_level_inputs_.files.push_back(f);
-      if (!compaction_picker_->ExpandInputsToCleanCut(cf_name_, vstorage_,
-                                                      &start_level_inputs_) ||
-          compaction_picker_->FilesRangeOverlapWithCompaction(
-              {start_level_inputs_}, output_level_,
-              Compaction::EvaluatePenultimateLevel(
-                  vstorage_, mutable_cf_options_, ioptions_, start_level_,
-                  output_level_))) {
+      if (start_level_ > ilevel_ &&
+          static_cast<int>(start_level_inputs_.size()) <
+              compaction_run_policy_->PickCompactionCount(start_level_) &&
+          (!compaction_picker_->ExpandInputsToCleanCut(cf_name_, vstorage_,
+                                                       &start_level_inputs_) ||
+           compaction_picker_->FilesRangeOverlapWithCompaction(
+               {start_level_inputs_}, output_level_,
+               Compaction::EvaluatePenultimateLevel(
+                   vstorage_, mutable_cf_options_, ioptions_, start_level_,
+                   output_level_)))) {
         // A locked (pending compaction) input-level file was pulled in due to
         // user-key overlap.
         start_level_inputs_.clear();
@@ -370,6 +379,11 @@ bool ILevelCompactionBuilder::PickFileToCompact() {
           return false;
         }
         continue;
+      }
+      size_t allowed =
+          compaction_run_policy_->PickCompactionCount(start_level_);
+      if (start_level_inputs_.size() > allowed) {
+        start_level_inputs_.files.resize(allowed);
       }
       // Now that input level is fully expanded, we check whether any output
       // files are locked due to pending compaction.
@@ -424,11 +438,13 @@ void ILevelCompactionBuilder::SetupInitialFiles() {
     if (start_level_score_ >= 1) {
       output_level_ =
           (start_level_ == 0) ? vstorage_->base_level() : start_level_ + 1;
-      bool picked_file_to_compact = PickFileToCompact();
+      bool picked_file_to_compact = PickRunsToCompact();
       TEST_SYNC_POINT_CALLBACK("PostPickFileToCompact",
                                &picked_file_to_compact);
       if (picked_file_to_compact) {
         // found the compaction!
+        start_level_inputs_.allowed =
+            compaction_run_policy_->PickCompactionCount(start_level_);
         if (start_level_ <= ilevel_) {
           // iLevel score = `num iLevel files` /
           // `level0_file_num_compaction_trigger`
@@ -627,7 +643,7 @@ bool ILevelCompactionBuilder::SetupOtherInputsIfNeeded() {
 
 Compaction* ILevelCompactionBuilder::GetCompaction() {
   // TryPickLITrivialMove() does not apply to the case when compacting LI to an
-  // empty output level. So LI files is picked in PickFileToCompact() by
+  // empty output level. So LI files is picked in PickRunsToCompact() by
   // compaction score. We may still be able to do trivial move when this file
   // does not overlap with other LIs. This happens when
   // compaction_inputs_[0].size() == 1 since SetupOtherLiFilesIfNeeded() did not
@@ -707,5 +723,16 @@ Compaction* ILevelCompactionPicker::PickCompaction(
                                   mutable_cf_options, ioptions_,
                                   mutable_db_options);
   return builder.PickCompaction();
+}
+
+CompactionILevelRunPolicy::CompactionILevelRunPolicy(
+    std::vector<int> policy_per_level) {
+  for (int lvl = 0; lvl < static_cast<int>(policy_per_level.size()); ++lvl) {
+    if (lvl == static_cast<int>(policy_per_level_.size())) {
+      policy_per_level_.push_back(policy_per_level[lvl]);
+    } else {
+      policy_per_level_[lvl] = policy_per_level[lvl];
+    }
+  }
 }
 }  // namespace ROCKSDB_NAMESPACE

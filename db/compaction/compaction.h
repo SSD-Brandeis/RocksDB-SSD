@@ -66,6 +66,8 @@ struct AtomicCompactionUnitBoundary {
 // with the same physical level.
 struct CompactionInputFiles {
   int level;
+  // num files/runs allowed to be compacted in single compaction
+  int allowed;
   std::vector<FileMetaData*> files;
   std::vector<AtomicCompactionUnitBoundary> atomic_compaction_unit_boundaries;
   inline bool empty() const { return files.empty(); }

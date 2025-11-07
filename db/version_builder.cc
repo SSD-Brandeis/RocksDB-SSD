@@ -1569,7 +1569,7 @@ class VersionBuilder::Rep {
         base_files, base_runs, unordered_added_files, level, cmp,
         [&](FileMetaData* file) { MaybeAddFile(vstorage, level, file); },
         [&](SortedRun run) { MaybeAddRun(vstorage, level, std::move(run)); });
-    // (shubham)
+    // (shubham) replacing below call with AddNewelyAddedFilesWithBase
     // MergeUnorderdAddedFilesWithBase(
     //     base_files, unordered_added_files, cmp,
     //     [&](FileMetaData* file) { MaybeAddFile(vstorage, level, file); });
@@ -1603,9 +1603,16 @@ class VersionBuilder::Rep {
         add_file_func(*base_iter++);
       }
     }
-
-    std::vector<SortedRun> merged_runs = base_runs;
+    std::vector<SortedRun> merged_runs;
+    merged_runs.reserve(base_runs.size() + 1);
+    merged_runs.insert(merged_runs.end(),
+                       std::make_move_iterator(base_runs.begin()),
+                       std::make_move_iterator(base_runs.end()));
     if (!added_files.empty()) {
+      if (!std::is_sorted(added_files.begin(), added_files.end(),
+                          *level_nonzero_cmp_)) {
+        std::sort(added_files.begin(), added_files.end(), *level_nonzero_cmp_);
+      }
       merged_runs.push_back(added_files);
     }
     merged_runs.erase(
@@ -1622,12 +1629,16 @@ class VersionBuilder::Rep {
         add_run_func(run);
       }
     } else {
-      SortedRun all_files;
+      size_t total_files = 0;
       for (const auto& run : merged_runs) {
-        for (const auto& fm : run) {
-          all_files.push_back(fm);
-        }
+        total_files += run.size();
       }
+      SortedRun all_files;
+      all_files.reserve(total_files);
+      for (auto& run : merged_runs) {
+        all_files.insert(all_files.end(), run.begin(), run.end());
+      }
+      std::sort(all_files.begin(), all_files.end(), cmp);
       add_run_func(all_files);
     }
   }
@@ -1695,13 +1706,16 @@ class VersionBuilder::Rep {
       }
     }
 
-    if (epoch_number_requirement == EpochNumberRequirement::kMightMissing) {
-      SaveSSTFilesTo(vstorage, /* level */ 0, *level_zero_cmp_by_seqno_);
-    } else {
-      SaveSSTFilesTo(vstorage, /* level */ 0, *level_zero_cmp_by_epochno_);
+    int ilevel = cfd_->GetLatestMutableCFOptions().ilevel;
+    for (int lvl = 0; lvl <= ilevel; lvl++) {
+      if (epoch_number_requirement == EpochNumberRequirement::kMightMissing) {
+        SaveSSTFilesTo(vstorage, lvl, *level_zero_cmp_by_seqno_);
+      } else {
+        SaveSSTFilesTo(vstorage, lvl, *level_zero_cmp_by_epochno_);
+      }
     }
 
-    for (int level = 1; level < num_levels_; ++level) {
+    for (int level = ilevel + 1; level < num_levels_; ++level) {
       SaveSSTFilesTo(vstorage, level, *level_nonzero_cmp_);
     }
   }

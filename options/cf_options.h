@@ -177,6 +177,7 @@ struct MutableCFOptions {
         uncache_aggressiveness(options.uncache_aggressiveness),
         ilevel(options.ilevel),
         leveli_file_num_compaction_trigger(options.leveli_file_num_compaction_trigger),
+        compaction_run_policy(options.compaction_run_policy),
         dynamic_file_size(options.dynamic_file_size) {
     RefreshDerivedOptions(options.num_levels, options.compaction_style);
   }
@@ -348,6 +349,7 @@ struct MutableCFOptions {
 
   int ilevel;
   std::vector<int> leveli_file_num_compaction_trigger;
+  std::shared_ptr<const CompactionRunPolicy> compaction_run_policy;
   bool dynamic_file_size;
   // Derived options
   // Per-level target file size.

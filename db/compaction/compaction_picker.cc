@@ -493,7 +493,8 @@ bool CompactionPicker::SetupOtherInputs(
   if (AreFilesInCompaction(output_level_inputs->files)) {
     return false;
   }
-  if (!output_level_inputs->empty()) {
+  if (!output_level_inputs->empty() &&
+      input_level > mutable_cf_options.ilevel) {
     if (!ExpandInputsToCleanCut(cf_name, vstorage, output_level_inputs)) {
       return false;
     }
@@ -526,8 +527,13 @@ bool CompactionPicker::SetupOtherInputs(
                                      &expanded_inputs.files, base_index,
                                      nullptr);
     }
+    if (ioptions_.compaction_style == CompactionStyle::kCompactionStyleiLevel &&
+        static_cast<int>(expanded_inputs.files.size()) > inputs->allowed) {
+      expanded_inputs.files.resize(inputs->allowed);
+    }
     uint64_t expanded_inputs_size = TotalFileSize(expanded_inputs.files);
-    if (!ExpandInputsToCleanCut(cf_name, vstorage, &expanded_inputs)) {
+    if (input_level > mutable_cf_options.ilevel &&
+        !ExpandInputsToCleanCut(cf_name, vstorage, &expanded_inputs)) {
       try_overlapping_inputs = false;
     }
     // It helps to reduce write amp and avoid a further separate compaction
@@ -548,16 +554,22 @@ bool CompactionPicker::SetupOtherInputs(
                                      *parent_index, parent_index);
       assert(!expanded_output_level_inputs.empty());
       if (!AreFilesInCompaction(expanded_output_level_inputs.files) &&
+          input_level > mutable_cf_options.ilevel &&
           ExpandInputsToCleanCut(cf_name, vstorage,
                                  &expanded_output_level_inputs) &&
           expanded_output_level_inputs.size() == output_level_inputs->size()) {
         expand_inputs = true;
       }
     }
-    if (!expand_inputs) {
+    if (!expand_inputs && input_level > mutable_cf_options.ilevel) {
       vstorage->GetCleanInputsWithinInterval(input_level, &all_start,
                                              &all_limit, &expanded_inputs.files,
                                              base_index, nullptr);
+      if (ioptions_.compaction_style ==
+              CompactionStyle::kCompactionStyleiLevel &&
+          static_cast<int>(expanded_inputs.files.size()) > inputs->allowed) {
+        expanded_inputs.files.resize(inputs->allowed);
+      }
       expanded_inputs_size = TotalFileSize(expanded_inputs.files);
       if (expanded_inputs.size() > inputs->size() &&
           !AreFilesInCompaction(expanded_inputs.files) &&
