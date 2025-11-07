@@ -39,4 +39,8 @@ const CompactionRunPolicy* NewCompactionILevelRunPolicy(
   return new CompactionILevelRunPolicy(policy_per_level);
 }
 
+const CompactionRunPolicy* NewFixedCompactionRunPolicy() {
+  return new FixedCompactionRunPolicy();
+}
+
 }  // namespace ROCKSDB_NAMESPACE

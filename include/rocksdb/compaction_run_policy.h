@@ -34,4 +34,6 @@ class FixedCompactionRunPolicy : public CompactionRunPolicy {
 const CompactionRunPolicy* NewCompactionILevelRunPolicy(
     std::vector<int> policy_per_level);
 
+const CompactionRunPolicy* NewFixedCompactionRunPolicy();
+
 }  // namespace ROCKSDB_NAMESPACE
