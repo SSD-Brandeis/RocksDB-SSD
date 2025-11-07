@@ -176,11 +176,10 @@ struct MutableCFOptions {
             options.bottommost_file_compaction_delay),
         uncache_aggressiveness(options.uncache_aggressiveness),
         ilevel(options.ilevel),
-        leveli_file_num_compaction_trigger(options.leveli_file_num_compaction_trigger),
+        dynamic_file_size(options.dynamic_file_size),
         compaction_run_policy(options.compaction_run_policy),
-        leveli_file_num_compaction_trigger(options.leveli_file_num_compaction_trigger),
-        compaction_run_policy(options.compaction_run_policy),
-        dynamic_file_size(options.dynamic_file_size) {
+        leveli_file_num_compaction_trigger(
+            options.leveli_file_num_compaction_trigger) {
     RefreshDerivedOptions(options.num_levels, options.compaction_style);
   }
 
@@ -238,8 +237,10 @@ struct MutableCFOptions {
         bottommost_file_compaction_delay(0),
         uncache_aggressiveness(0),
         ilevel(0),
-        leveli_file_num_compaction_trigger(std::vector<int>(20, max_bytes_for_level_multiplier)), //TODO: figure out how to put max_level here
-        dynamic_file_size(false) {}
+        dynamic_file_size(false),
+        leveli_file_num_compaction_trigger(
+            std::vector<int>(20, max_bytes_for_level_multiplier)) {
+  }  // TODO: figure out how to put max_level here
 
   explicit MutableCFOptions(const Options& options);
 
@@ -350,11 +351,12 @@ struct MutableCFOptions {
   uint32_t uncache_aggressiveness;
 
   int ilevel;
-  std::vector<int> leveli_file_num_compaction_trigger;
-  std::shared_ptr<const CompactionRunPolicy> compaction_run_policy;
-  std::vector<int> leveli_file_num_compaction_trigger;
-  std::shared_ptr<const CompactionRunPolicy> compaction_run_policy;
   bool dynamic_file_size;
+
+  std::shared_ptr<const CompactionRunPolicy> compaction_run_policy;
+
+  std::vector<int> leveli_file_num_compaction_trigger;
+
   // Derived options
   // Per-level target file size.
   std::vector<uint64_t> max_file_size;

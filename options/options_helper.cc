@@ -301,11 +301,9 @@ void UpdateColumnFamilyOptions(const MutableCFOptions& moptions,
   cf_opts->memtable_max_range_deletions = moptions.memtable_max_range_deletions;
   cf_opts->uncache_aggressiveness = moptions.uncache_aggressiveness;
   cf_opts->ilevel = moptions.ilevel;
-  cf_opts->leveli_file_num_compaction_trigger = moptions.leveli_file_num_compaction_trigger;
-  cf_opts->compaction_run_policy = moptions.compaction_run_policy;
-  cf_opts->leveli_file_num_compaction_trigger = moptions.leveli_file_num_compaction_trigger;
-  cf_opts->compaction_run_policy = moptions.compaction_run_policy;
   cf_opts->dynamic_file_size = moptions.dynamic_file_size;
+  cf_opts->compaction_run_policy = moptions.compaction_run_policy;
+  cf_opts->leveli_file_num_compaction_trigger = moptions.leveli_file_num_compaction_trigger;
 }
 
 void UpdateColumnFamilyOptions(const ImmutableCFOptions& ioptions,
