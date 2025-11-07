@@ -752,9 +752,10 @@ ILevelSizeRatioPolicy::ILevelSizeRatioPolicy(
 
 ILevelNumFileCompactTriggerPolicy::ILevelNumFileCompactTriggerPolicy(
     std::vector<double> ratio_per_level, int ilevel, int default_ratio) {
-  for (int i = 0; i <= ilevel; i++){
+      NumFileTrigger_.push_back(default_ratio);
+  for (int i = 1; i <= ilevel; i++){
       if (i <= static_cast<int>(ratio_per_level.size())){
-        NumFileTrigger_.push_back(static_cast<int>(ratio_per_level[i]));
+        NumFileTrigger_.push_back(static_cast<int>(ratio_per_level[i - 1]) * NumFileTrigger_[i - 1]);
       } else {
         NumFileTrigger_.push_back(default_ratio);
       }
