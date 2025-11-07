@@ -1109,6 +1109,10 @@ struct AdvancedColumnFamilyOptions {
   std::shared_ptr<const CompactionRunPolicy> compaction_run_policy = nullptr;
   std::vector<int> leveli_file_num_compaction_trigger = std::vector<int>(num_levels, max_bytes_for_level_multiplier);
 
+  // Compaction run policy defined the number of tiers/files
+  //  a single compaction can pick from a specific level
+  std::shared_ptr<const CompactionRunPolicy> compaction_run_policy = nullptr;
+
   bool dynamic_file_size;
 
   // Create ColumnFamilyOptions with default values for all fields
