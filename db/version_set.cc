@@ -149,7 +149,7 @@ class FilePicker {
   FilePicker(const Slice& user_key, const Slice& ikey,
              autovector<LevelFilesBrief>* file_levels, unsigned int num_levels,
              FileIndexer* file_indexer, const Comparator* user_comparator,
-             const InternalKeyComparator* internal_comparator)
+             const InternalKeyComparator* internal_comparator, const int ilevel = 0)
       : num_levels_(num_levels),
         curr_level_(static_cast<unsigned int>(-1)),
         returned_file_level_(static_cast<unsigned int>(-1)),
@@ -163,7 +163,8 @@ class FilePicker {
         ikey_(ikey),
         file_indexer_(file_indexer),
         user_comparator_(user_comparator),
-        internal_comparator_(internal_comparator) {
+        internal_comparator_(internal_comparator),
+        ilevel_(ilevel) {
     // Setup member variables to search first level.
     search_ended_ = !PrepareNextLevel();
     if (!search_ended_) {
@@ -222,7 +223,7 @@ class FilePicker {
           }
           // Key falls out of current file's range
           if (cmp_smallest < 0 || cmp_largest > 0) {
-            if (curr_level_ == 0) {
+            if (curr_level_ <= ilevel_) {
               ++curr_index_in_curr_level_;
               continue;
             } else {
@@ -274,6 +275,7 @@ class FilePicker {
   FileIndexer* file_indexer_;
   const Comparator* user_comparator_;
   const InternalKeyComparator* internal_comparator_;
+  const int ilevel_;
 
   // Setup local variables to search next level.
   // Returns false if there are no more levels to search.
@@ -302,8 +304,8 @@ class FilePicker {
       // any level. Otherwise, it only occurs at Level-0 (since Put/Deletes
       // are always compacted into a single entry).
       int32_t start_index;
-      if (curr_level_ == 0) {
-        // On Level-0, we read through all files to check for overlap.
+      if (curr_level_ <= ilevel_) {
+        // On Level-0/iLevels, we read through all files to check for overlap.
         start_index = 0;
       } else {
         // On Level-n (n>=1), files are sorted. Binary search to find the
@@ -1577,7 +1579,8 @@ void LevelIterator::InitFileIterator(size_t new_file_index) {
 
 void Version::PrintFullTreeSummary() {
 #ifdef PROFILE
-  std::cout << "\n====================== LSM-tree state =======================\n";
+  std::cout
+      << "\n====================== LSM-tree state =======================\n";
 
   for (int i = 0; i < storage_info_.num_levels(); i++) {
     std::cout << "Level #" << i
@@ -2491,7 +2494,7 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
   FilePicker fp(user_key, ikey, &storage_info_.level_files_brief_,
                 storage_info_.num_non_empty_levels_,
                 &storage_info_.file_indexer_, user_comparator(),
-                internal_comparator());
+                internal_comparator(), mutable_cf_options_.ilevel);
   FdWithKeyRange* f = fp.GetNextFile();
 
   while (f != nullptr) {
