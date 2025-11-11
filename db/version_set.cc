@@ -202,7 +202,7 @@ class FilePicker {
           // Check if key is within a file's range. If search left bound and
           // right bound point to the same find, we are sure key falls in
           // range.
-          assert(curr_level_ == 0 ||
+          assert(curr_level_ <= ilevel_ ||
                  curr_index_in_curr_level_ == start_index_in_curr_level_ ||
                  user_comparator_->CompareWithoutTimestamp(
                      user_key_, ExtractUserKey(f->smallest_key)) <= 0);
@@ -216,7 +216,7 @@ class FilePicker {
 
           // Setup file search bound for the next level based on the
           // comparison results
-          if (curr_level_ > 0) {
+          if (curr_level_ > ilevel_) {
             file_indexer_->GetNextLevelIndex(
                 curr_level_, curr_index_in_curr_level_, cmp_smallest,
                 cmp_largest, &search_left_bound_, &search_right_bound_);
