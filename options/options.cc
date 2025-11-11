@@ -68,7 +68,6 @@ AdvancedColumnFamilyOptions::AdvancedColumnFamilyOptions(const Options& options)
       level_compaction_dynamic_level_bytes(
           options.level_compaction_dynamic_level_bytes),
       max_bytes_for_level_multiplier(options.max_bytes_for_level_multiplier),
-      size_ratio(options.size_ratio),
       max_bytes_for_level_multiplier_additional(
           options.max_bytes_for_level_multiplier_additional),
       max_compaction_bytes(options.max_compaction_bytes),
@@ -113,7 +112,8 @@ AdvancedColumnFamilyOptions::AdvancedColumnFamilyOptions(const Options& options)
       blob_file_starting_level(options.blob_file_starting_level),
       blob_cache(options.blob_cache),
       prepopulate_blob_cache(options.prepopulate_blob_cache),
-      persist_user_defined_timestamps(options.persist_user_defined_timestamps) {
+      persist_user_defined_timestamps(options.persist_user_defined_timestamps),
+      fluidlsm_policy(options.fluidlsm_policy) {
   assert(memtable_factory.get() != nullptr);
   if (max_bytes_for_level_multiplier_additional.size() <
       static_cast<unsigned int>(num_levels)) {

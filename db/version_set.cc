@@ -8,7 +8,7 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
 #include "db/version_set.h"
-#include "rocksdb/tree_structure_policy.h"
+#include "rocksdb/fluidlsm_policy.h"
 
 #include <algorithm>
 #include <array>
@@ -275,7 +275,7 @@ class FilePicker {
   FileIndexer* file_indexer_;
   const Comparator* user_comparator_;
   const InternalKeyComparator* internal_comparator_;
-  const int ilevel_;
+  const unsigned int ilevel_;
 
   // Setup local variables to search next level.
   // Returns false if there are no more levels to search.
@@ -3572,15 +3572,11 @@ void VersionStorageInfo::ComputeCompactionScore(
         // the score may be a false positive signal.
         // `level0_file_num_compaction_trigger` is used as a trigger to check
         // if there is any compaction work to do.
-        int level_score =
-            (compaction_style_ == kCompactionStyleiLevel)
-                ? mutable_cf_options.leveli_file_num_compaction_trigger->NumFileTrigger(level)
-                : mutable_cf_options.level0_file_num_compaction_trigger;
         score = static_cast<double>(num_sorted_runs) /
-                level_score;
+                mutable_cf_options.level0_file_num_compaction_trigger;
         if (compaction_style_ == kCompactionStyleiLevel) {
           score = static_cast<double>(sorted_runs_per_level_[level].size()) /
-                  level_score;
+                  mutable_cf_options.fluidlsm_policy->NumRuns(level);
         } else if (compaction_style_ == kCompactionStyleLevel &&
                    num_levels() > 1) {
           // Level-based involves L0->L0 compactions that can lead to oversized
@@ -4831,14 +4827,14 @@ void VersionStorageInfo::CalculateBaseBytes(const ImmutableOptions& ioptions,
       if (i == 0 && ioptions.compaction_style == kCompactionStyleUniversal) {
         level_max_bytes_[i] = options.max_bytes_for_level_base;
       } else if (i >= 1) {
-        double ratio =
+        double level_ratio =
             (compaction_style_ == kCompactionStyleiLevel)
-                ? options.size_ratio->SizeRatio(i - 1)
+                ? options.fluidlsm_policy->SizeRatio(i - 1)
                 : options.max_bytes_for_level_multiplier;
 
         level_max_bytes_[i] =
             MultiplyCheckOverflow(MultiplyCheckOverflow(level_max_bytes_[i - 1],
-                                                        ratio),
+                                                        level_ratio),
                                   options.MaxBytesMultiplerAdditional(i - 1));
       } else {
         level_max_bytes_[i] = options.max_bytes_for_level_base;
@@ -4880,12 +4876,12 @@ void VersionStorageInfo::CalculateBaseBytes(const ImmutableOptions& ioptions,
       uint64_t base_bytes_max = options.max_bytes_for_level_base;
       double smallest = 0;
       for (int i = 0; i < num_levels_; i++) {
-        double ratio =
+        double level_ratio =
             (compaction_style_ == kCompactionStyleiLevel)
-                ? options.size_ratio->SizeRatio(i)
+                ? options.fluidlsm_policy->SizeRatio(i)
                 : options.max_bytes_for_level_multiplier;
-        if (ratio < smallest) {
-          smallest = ratio;
+        if (level_ratio < smallest) {
+          smallest = level_ratio;
         }
       }
       uint64_t base_bytes_min =
@@ -4894,13 +4890,13 @@ void VersionStorageInfo::CalculateBaseBytes(const ImmutableOptions& ioptions,
       // Try whether we can make last level's target size to be max_level_size
       uint64_t cur_level_size = max_level_size;
       for (int i = num_levels_ - 2; i >= first_non_empty_level; i--) {
-        double ratio =
+        double level_ratio =
             (compaction_style_ == kCompactionStyleiLevel)
-                ? options.size_ratio->SizeRatio(i)
+                ? options.fluidlsm_policy->SizeRatio(i)
                 : options.max_bytes_for_level_multiplier;
         // Round up after dividing
         cur_level_size =
-            static_cast<uint64_t>(cur_level_size / ratio);
+            static_cast<uint64_t>(cur_level_size / level_ratio);
         if (lowest_unnecessary_level_ == -1 &&
             cur_level_size <= base_bytes_min &&
             (options.preclude_last_level_data_seconds == 0 ||
@@ -4939,13 +4935,13 @@ void VersionStorageInfo::CalculateBaseBytes(const ImmutableOptions& ioptions,
         // Find base level (where L0 data is compacted to).
         base_level_ = first_non_empty_level;
         while (base_level_ > 1 && cur_level_size > base_bytes_max) {
-          double ratio =
+          double level_ratio =
             (compaction_style_ == kCompactionStyleiLevel)
-                ? options.size_ratio->SizeRatio(base_level_)
+                ? options.fluidlsm_policy->SizeRatio(base_level_)
                 : options.max_bytes_for_level_multiplier;
           --base_level_;
           cur_level_size = static_cast<uint64_t>(
-              cur_level_size / ratio);
+              cur_level_size / level_ratio);
         }
         if (cur_level_size > base_bytes_max) {
           // Even L1 will be too large
@@ -4962,11 +4958,11 @@ void VersionStorageInfo::CalculateBaseBytes(const ImmutableOptions& ioptions,
       uint64_t level_size = base_level_size;
       for (int i = base_level_; i < num_levels_; i++) {
         if (i > base_level_) {
-          double ratio =
+          double level_ratio =
             (compaction_style_ == kCompactionStyleiLevel)
-                ? options.size_ratio->SizeRatio(i)
+                ? options.fluidlsm_policy->SizeRatio(i)
                 : options.max_bytes_for_level_multiplier;
-          level_size = MultiplyCheckOverflow(level_size, ratio);
+          level_size = MultiplyCheckOverflow(level_size, level_ratio);
         }
         // Don't set any level below base_bytes_max. Otherwise, the LSM can
         // assume an hourglass shape where L1+ sizes are smaller than L0. This

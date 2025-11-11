@@ -132,7 +132,6 @@ struct MutableCFOptions {
         target_file_size_multiplier(options.target_file_size_multiplier),
         max_bytes_for_level_base(options.max_bytes_for_level_base),
         max_bytes_for_level_multiplier(options.max_bytes_for_level_multiplier),
-        size_ratio(options.size_ratio),
         ttl(options.ttl),
         periodic_compaction_seconds(options.periodic_compaction_seconds),
         max_bytes_for_level_multiplier_additional(
@@ -178,8 +177,7 @@ struct MutableCFOptions {
         ilevel(options.ilevel),
         dynamic_file_size(options.dynamic_file_size),
         compaction_run_policy(options.compaction_run_policy),
-        leveli_file_num_compaction_trigger(
-            options.leveli_file_num_compaction_trigger) {
+        fluidlsm_policy(options.fluidlsm_policy) {
     RefreshDerivedOptions(options.num_levels, options.compaction_style);
   }
 
@@ -305,7 +303,6 @@ struct MutableCFOptions {
   int target_file_size_multiplier;
   uint64_t max_bytes_for_level_base;
   double max_bytes_for_level_multiplier;
-  std::shared_ptr<const SizeRatioPolicy> size_ratio;
   uint64_t ttl;
   uint64_t periodic_compaction_seconds;
   std::vector<int> max_bytes_for_level_multiplier_additional;
@@ -350,8 +347,7 @@ struct MutableCFOptions {
   bool dynamic_file_size;
 
   std::shared_ptr<const CompactionRunPolicy> compaction_run_policy;
-
-  std::shared_ptr<const CompactionILevelNumFileTriggerPolicy> leveli_file_num_compaction_trigger;
+  std::shared_ptr<const FluidLSMPolicy> fluidlsm_policy;
 
   // Derived options
   // Per-level target file size.

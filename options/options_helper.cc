@@ -253,7 +253,6 @@ void UpdateColumnFamilyOptions(const MutableCFOptions& moptions,
   cf_opts->max_bytes_for_level_base = moptions.max_bytes_for_level_base;
   cf_opts->max_bytes_for_level_multiplier =
       moptions.max_bytes_for_level_multiplier;
-  cf_opts->size_ratio = moptions.size_ratio;
   cf_opts->ttl = moptions.ttl;
   cf_opts->periodic_compaction_seconds = moptions.periodic_compaction_seconds;
   cf_opts->preclude_last_level_data_seconds =
@@ -303,7 +302,7 @@ void UpdateColumnFamilyOptions(const MutableCFOptions& moptions,
   cf_opts->ilevel = moptions.ilevel;
   cf_opts->dynamic_file_size = moptions.dynamic_file_size;
   cf_opts->compaction_run_policy = moptions.compaction_run_policy;
-  cf_opts->leveli_file_num_compaction_trigger = moptions.leveli_file_num_compaction_trigger;
+  cf_opts->fluidlsm_policy = moptions.fluidlsm_policy;
 }
 
 void UpdateColumnFamilyOptions(const ImmutableCFOptions& ioptions,
