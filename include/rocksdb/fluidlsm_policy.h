@@ -36,29 +36,8 @@ class LeveledLSMPolicy : public FluidLSMPolicy {
 };
 
 // policy per level is configuration through passed vector
-const FluidLSMPolicy* NewFluidLSMPolicy(std::vector<double> ratio_per_level,
-                                        std::vector<double> runs_per_level,
+const FluidLSMPolicy* NewFluidLSMPolicy(std::vector<double> level_size_ratio,
+                                        std::vector<double> level_num_runs,
                                         int num_levels, double default_ratio);
 
-// class CompactionILevelNumFileTriggerPolicy {
-//  public:
-//   virtual ~CompactionILevelNumFileTriggerPolicy() = default;
-
-//   // Returns the size ratio from the given level
-//   virtual int NumFileTrigger(int level) const = 0;
-
-//   virtual const char* Name() const = 0;
-// };
-
-// // Always returns 1 for each level
-// class FixedNumFileTriggerPolicy : public CompactionILevelNumFileTriggerPolicy
-// {
-//  public:
-//   int NumFileTrigger(int level) const override { return 4; }
-//   const char* Name() const { return "FixedNumFileTrigger"; }
-// };
-
-// // policy per level is configuration through passed vector
-// const CompactionILevelNumFileTriggerPolicy* NewILevelFileCompactTrigger(
-//     std::vector<double> ratio_per_level, int ilevel, int default_ratio);
 }  // namespace ROCKSDB_NAMESPACE

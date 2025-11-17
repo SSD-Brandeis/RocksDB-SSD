@@ -113,7 +113,7 @@ AdvancedColumnFamilyOptions::AdvancedColumnFamilyOptions(const Options& options)
       blob_cache(options.blob_cache),
       prepopulate_blob_cache(options.prepopulate_blob_cache),
       persist_user_defined_timestamps(options.persist_user_defined_timestamps),
-      compaction_run_policy(options.compaction_run_policy),
+      level_compaction_granularity(options.level_compaction_granularity),
       fluidlsm_policy(options.fluidlsm_policy) {
   assert(memtable_factory.get() != nullptr);
   if (max_bytes_for_level_multiplier_additional.size() <

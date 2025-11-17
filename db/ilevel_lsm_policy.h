@@ -13,8 +13,8 @@ namespace ROCKSDB_NAMESPACE {
 // a single compaction can pick from a specific level
 class ILevelLSMPolicy : public FluidLSMPolicy {
  public:
-  explicit ILevelLSMPolicy(std::vector<double> ratio_per_level,
-                           std::vector<double> runs_per_level, int num_levels,
+  explicit ILevelLSMPolicy(std::vector<double> level_size_ratio,
+                           std::vector<double> level_num_runs, int num_levels,
                            double default_ratios);
   const char* Name() const { return "ILevelLSMPolicy"; }
 
@@ -56,10 +56,10 @@ class ILevelLSMPolicy : public FluidLSMPolicy {
   double default_ratio_;
 };
 
-const FluidLSMPolicy* NewFluidLSMPolicy(std::vector<double> ratio_per_level,
-                                        std::vector<double> runs_per_level,
+const FluidLSMPolicy* NewFluidLSMPolicy(std::vector<double> level_size_ratio,
+                                        std::vector<double> level_num_runs,
                                         int num_levels, double default_ratio) {
-  return new ILevelLSMPolicy(ratio_per_level, runs_per_level, num_levels,
+  return new ILevelLSMPolicy(level_size_ratio, level_num_runs, num_levels,
                              default_ratio);
 }
 

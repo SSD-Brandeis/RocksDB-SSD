@@ -11,32 +11,32 @@ namespace ROCKSDB_NAMESPACE {
 // a single compaction can pick from a specific level
 class CompactionILevelRunPolicy : public CompactionRunPolicy {
  public:
-  explicit CompactionILevelRunPolicy(std::vector<int> policy_per_level);
+  explicit CompactionILevelRunPolicy(std::vector<int> level_compaction_granularity);
   const char* Name() const { return "CompactionILevelRunPolicy"; }
 
   int PickCompactionCount(int level) const override {
-    if (level > static_cast<int>(policy_per_level_.size()) - 1) {
-      return policy_per_level_[policy_per_level_.size() - 1];
+    if (level > static_cast<int>(level_compaction_granularity_.size()) - 1) {
+      return level_compaction_granularity_[level_compaction_granularity_.size() - 1];
     }
-    return policy_per_level_[level];
+    return level_compaction_granularity_[level];
   }
 
   void UpdateCompactionCount(int level, int count) {
-    assert(level <= static_cast<int>(policy_per_level_.size()));
-    if (level == static_cast<int>(policy_per_level_.size())) {
-      policy_per_level_.push_back(count);
+    assert(level <= static_cast<int>(level_compaction_granularity_.size()));
+    if (level == static_cast<int>(level_compaction_granularity_.size())) {
+      level_compaction_granularity_.push_back(count);
     } else {
-      policy_per_level_[level] = count;
+      level_compaction_granularity_[level] = count;
     }
   }
 
  private:
-  std::vector<int> policy_per_level_{};
+  std::vector<int> level_compaction_granularity_{};
 };
 
 const CompactionRunPolicy* NewCompactionILevelRunPolicy(
-    std::vector<int> policy_per_level) {
-  return new CompactionILevelRunPolicy(policy_per_level);
+    std::vector<int> level_compaction_granularity) {
+  return new CompactionILevelRunPolicy(level_compaction_granularity);
 }
 
 const CompactionRunPolicy* NewFixedCompactionRunPolicy() {

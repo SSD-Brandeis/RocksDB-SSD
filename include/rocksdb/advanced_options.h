@@ -18,7 +18,6 @@
 namespace ROCKSDB_NAMESPACE {
 
 class FluidLSMPolicy;
-// class CompactionILevelNumFileTriggerPolicy;
 class CompactionRunPolicy;
 class Slice;
 class SliceTransform;
@@ -1106,7 +1105,7 @@ struct AdvancedColumnFamilyOptions {
 
   // Compaction run policy defined the number of tiers/files
   //  a single compaction can pick from a specific level
-  std::shared_ptr<const CompactionRunPolicy> compaction_run_policy = nullptr;
+  std::shared_ptr<const CompactionRunPolicy> level_compaction_granularity = nullptr;
 
   // Fluid LSM policy defines the LSM layout based on tiers/runs and files
   std::shared_ptr<const FluidLSMPolicy> fluidlsm_policy = nullptr;

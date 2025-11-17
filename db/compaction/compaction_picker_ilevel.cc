@@ -6,7 +6,6 @@
 
 #include "compaction_ilevel_run_policy.h"
 #include "db/ilevel_lsm_policy.h"
-// #include "db/num_file_compact_trigger_ilevel_policy.h"
 #include "db/version_edit.h"
 #include "logging/log_buffer.h"
 #include "test_util/sync_point.h"
@@ -65,7 +64,7 @@ class ILevelCompactionBuilder {
         ioptions_(ioptions),
         mutable_db_options_(mutable_db_options),
         ilevel_(mutable_cf_options.ilevel),
-        compaction_run_policy_(mutable_cf_options.compaction_run_policy) {}
+        level_compaction_granularity_(mutable_cf_options.level_compaction_granularity) {}
 
   // Pick and return a compaction.
   Compaction* PickCompaction();
@@ -165,7 +164,7 @@ class ILevelCompactionBuilder {
 
   // Compaction run picker, which decides how many tiers/files a
   // single compaction can pick from a specific level
-  std::shared_ptr<const CompactionRunPolicy> compaction_run_policy_;
+  std::shared_ptr<const CompactionRunPolicy> level_compaction_granularity_;
 };
 
 /*
@@ -330,7 +329,7 @@ bool ILevelCompactionBuilder::PickRunsToCompact() {
     // if `start_level_` < ilevel, pick all the files.
     const std::vector<SortedRun>& level_runs =
         vstorage_->LevelRuns(start_level_);
-    int num_runs = compaction_run_policy_->PickCompactionCount(start_level_);
+    int num_runs = level_compaction_granularity_->PickCompactionCount(start_level_);
     for (int index = static_cast<int>(level_runs.size()) - 1;
          index >= 0 && num_runs > 0; index--) {
       SortedRun run = level_runs[index];
@@ -367,7 +366,7 @@ bool ILevelCompactionBuilder::PickRunsToCompact() {
       start_level_inputs_.files.push_back(f);
       if (start_level_ > ilevel_ &&
           static_cast<int>(start_level_inputs_.size()) <
-              compaction_run_policy_->PickCompactionCount(start_level_) &&
+              level_compaction_granularity_->PickCompactionCount(start_level_) &&
           (!compaction_picker_->ExpandInputsToCleanCut(cf_name_, vstorage_,
                                                        &start_level_inputs_) ||
            compaction_picker_->FilesRangeOverlapWithCompaction(
@@ -385,7 +384,7 @@ bool ILevelCompactionBuilder::PickRunsToCompact() {
         continue;
       }
       size_t allowed =
-          compaction_run_policy_->PickCompactionCount(start_level_);
+          level_compaction_granularity_->PickCompactionCount(start_level_);
       if (start_level_inputs_.size() > allowed) {
         start_level_inputs_.files.resize(allowed);
       }
@@ -448,7 +447,7 @@ void ILevelCompactionBuilder::SetupInitialFiles() {
       if (picked_file_to_compact) {
         // found the compaction!
         start_level_inputs_.allowed =
-            compaction_run_policy_->PickCompactionCount(start_level_);
+            level_compaction_granularity_->PickCompactionCount(start_level_);
         if (start_level_ <= ilevel_) {
           // iLevel score = `num iLevel files` /
           // `level0_file_num_compaction_trigger`
@@ -732,10 +731,10 @@ Compaction* ILevelCompactionPicker::PickCompaction(
 CompactionILevelRunPolicy::CompactionILevelRunPolicy(
     std::vector<int> policy_per_level) {
   for (int lvl = 0; lvl < static_cast<int>(policy_per_level.size()); ++lvl) {
-    if (lvl == static_cast<int>(policy_per_level_.size())) {
-      policy_per_level_.push_back(policy_per_level[lvl]);
+    if (lvl == static_cast<int>(level_compaction_granularity_.size())) {
+      level_compaction_granularity_.push_back(policy_per_level[lvl]);
     } else {
-      policy_per_level_[lvl] = policy_per_level[lvl];
+      level_compaction_granularity_[lvl] = policy_per_level[lvl];
     }
   }
 }
@@ -744,31 +743,18 @@ ILevelLSMPolicy::ILevelLSMPolicy(std::vector<double> ratio_per_level,
                                  std::vector<double> runs_per_level,
                                  int num_levels, double default_ratio) {
   for (int i = 0; i < num_levels; i++) {
-    if (i <= static_cast<int>(ratio_per_level.size())) {
+    if (i < static_cast<int>(ratio_per_level.size())) {
       size_ratio_.push_back(ratio_per_level[i]);
     } else {
       size_ratio_.push_back(default_ratio);
     }
   }
   for (int i = 0; i < num_levels; i++) {
-    if (i <= static_cast<int>(runs_per_level.size())) {
+    if (i < static_cast<int>(runs_per_level.size())) {
       num_runs_.push_back(runs_per_level[i]);
     } else {
       num_runs_.push_back(1.0);
     }
   }
 }
-
-// ILevelNumFileCompactTriggerPolicy::ILevelNumFileCompactTriggerPolicy(
-//     std::vector<double> ratio_per_level, int ilevel, int default_ratio) {
-//       NumFileTrigger_.push_back(default_ratio);
-//   for (int i = 1; i <= ilevel; i++){
-//       if (i <= static_cast<int>(ratio_per_level.size())){
-//         NumFileTrigger_.push_back(static_cast<int>(ratio_per_level[i - 1]) *
-//         NumFileTrigger_[i - 1]);
-//       } else {
-//         NumFileTrigger_.push_back(default_ratio);
-//       }
-//     }
-// }
 }  // namespace ROCKSDB_NAMESPACE

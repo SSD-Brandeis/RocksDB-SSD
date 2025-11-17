@@ -32,7 +32,7 @@ class FixedCompactionRunPolicy : public CompactionRunPolicy {
 
 // policy per level is configuration through passed vector
 const CompactionRunPolicy* NewCompactionILevelRunPolicy(
-    std::vector<int> policy_per_level);
+    std::vector<int> level_compaction_granularity);
 
 const CompactionRunPolicy* NewFixedCompactionRunPolicy();
 

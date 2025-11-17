@@ -1608,8 +1608,8 @@ void Version::PrintFullTreeSummary() {
         << ")"
         << (ioptions.compaction_style == CompactionStyle::kCompactionStyleiLevel
                 ? "--- granularity: " +
-                      std::to_string(mutable_cf_options_.compaction_run_policy
-                          ->PickCompactionCount(i)) +
+                      std::to_string(mutable_cf_options_.level_compaction_granularity
+                                         ->PickCompactionCount(i)) +
                       (i > mutable_cf_options_.ilevel ? " files" : " runs")
                 : "")
         << " --- score: " << storage_info_.GetScoreForLevel(i) << std::endl;
