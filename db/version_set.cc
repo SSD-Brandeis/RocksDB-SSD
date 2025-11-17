@@ -1597,15 +1597,21 @@ void Version::PrintFullTreeSummary() {
         << ") --- layout: "
         << (i > mutable_cf_options_.ilevel ? "leveled" : "tiered")
         << " --- fullness ("
-        << (i > mutable_cf_options_.ilevel
+        << (ioptions.compaction_style !=
+                        CompactionStyle::kCompactionStyleiLevel ||
+                    i > mutable_cf_options_.ilevel
                 ? std::to_string(storage_info_.NumLevelBytes(i)) + "/" +
                       std::to_string(storage_info_.MaxBytesForLevel(i))
                 : std::to_string(storage_info_.NumLevelRuns(i)) + "/" +
                       std::to_string(
                           mutable_cf_options_.fluidlsm_policy->GetNumRuns(i)))
-        << ") --- granularity: "
-        << mutable_cf_options_.compaction_run_policy->PickCompactionCount(i)
-        << (i > mutable_cf_options_.ilevel ? " files" : " runs")
+        << ")"
+        << (ioptions.compaction_style == CompactionStyle::kCompactionStyleiLevel
+                ? "--- granularity: " +
+                      std::to_string(mutable_cf_options_.compaction_run_policy
+                          ->PickCompactionCount(i)) +
+                      (i > mutable_cf_options_.ilevel ? " files" : " runs")
+                : "")
         << " --- score: " << storage_info_.GetScoreForLevel(i) << std::endl;
 
     int run_id = 0;
