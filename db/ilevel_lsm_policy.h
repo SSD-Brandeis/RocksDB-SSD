@@ -18,14 +18,14 @@ class ILevelLSMPolicy : public FluidLSMPolicy {
                            double default_ratios);
   const char* Name() const { return "ILevelLSMPolicy"; }
 
-  double SizeRatio(int level) const override {
+  double GetSizeRatio(int level) const override {
     if (level > static_cast<int>(size_ratio_.size()) - 1) {
       return size_ratio_[size_ratio_.size() - 1];
     }
     return size_ratio_[level];
   }
 
-  double NumRuns(int level) const override {
+  double GetNumRuns(int level) const override {
     if (level > static_cast<int>(num_runs_.size()) - 1) {
       return num_runs_[num_runs_.size() - 1];
     }

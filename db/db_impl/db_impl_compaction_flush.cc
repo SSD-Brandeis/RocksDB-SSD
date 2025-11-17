@@ -32,10 +32,17 @@
 namespace ROCKSDB_NAMESPACE {
 
 void DBImpl::PrintFullTreeSummary() const {
-  versions_->GetColumnFamilySet()
-      ->GetDefault()
-      ->current()
-      ->PrintFullTreeSummary();
+  mutex_.Lock();
+  auto cfd = versions_->GetColumnFamilySet()->GetDefault();
+  Version* v = cfd->current();
+  v->Ref();
+  mutex_.Unlock();
+
+  v->PrintFullTreeSummary();
+
+  mutex_.Lock();
+  v->Unref();
+  mutex_.Unlock();
 }
 
 bool DBImpl::EnoughRoomForCompaction(

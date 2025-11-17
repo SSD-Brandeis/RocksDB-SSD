@@ -8,7 +8,6 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
 #include "db/version_set.h"
-#include "rocksdb/fluidlsm_policy.h"
 
 #include <algorithm>
 #include <array>
@@ -44,6 +43,10 @@
 #include "db/version_edit_handler.h"
 #include "db/wide/wide_columns_helper.h"
 #include "file/file_util.h"
+#ifdef PROFILE
+#include "rocksdb/compaction_run_policy.h"
+#endif  // PROFILE
+#include "rocksdb/fluidlsm_policy.h"
 #include "table/compaction_merging_iterator.h"
 
 #if USE_COROUTINES
@@ -149,7 +152,8 @@ class FilePicker {
   FilePicker(const Slice& user_key, const Slice& ikey,
              autovector<LevelFilesBrief>* file_levels, unsigned int num_levels,
              FileIndexer* file_indexer, const Comparator* user_comparator,
-             const InternalKeyComparator* internal_comparator, const int ilevel = 0)
+             const InternalKeyComparator* internal_comparator,
+             const int ilevel = 0)
       : num_levels_(num_levels),
         curr_level_(static_cast<unsigned int>(-1)),
         returned_file_level_(static_cast<unsigned int>(-1)),
@@ -234,7 +238,7 @@ class FilePicker {
         }
 
         returned_file_level_ = curr_level_;
-        if (curr_level_ > 0 && cmp_largest < 0) {
+        if (curr_level_ > ilevel_ && cmp_largest < 0) {
           // No more files to search in this level.
           search_ended_ = !PrepareNextLevel();
         } else {
@@ -1582,47 +1586,51 @@ void Version::PrintFullTreeSummary() {
   std::cout
       << "\n====================== LSM-tree state =======================\n";
 
+  const ReadOptions ro;
+  const auto& ioptions = cfd_->ioptions();
+  const auto& mutable_cf_opts = cfd_->GetLatestMutableCFOptions();
+
   for (int i = 0; i < storage_info_.num_levels(); i++) {
-    std::cout << "Level #" << i
-              << " [# runs: " << storage_info_.LevelRuns(i).size() << "]"
-              << std::endl;
+    std::cout
+        << "level " << i << " [num runs: " << storage_info_.NumLevelRuns(i)
+        << "]"
+        << ") --- layout: "
+        << (i > mutable_cf_options_.ilevel ? "leveled" : "tiered")
+        << " --- fullness ("
+        << (i > mutable_cf_options_.ilevel
+                ? std::to_string(storage_info_.NumLevelBytes(i)) + "/" +
+                      std::to_string(storage_info_.MaxBytesForLevel(i))
+                : std::to_string(storage_info_.NumLevelRuns(i)) + "/" +
+                      std::to_string(
+                          mutable_cf_options_.fluidlsm_policy->GetNumRuns(i)))
+        << ") --- granularity: "
+        << mutable_cf_options_.compaction_run_policy->PickCompactionCount(i)
+        << (i > mutable_cf_options_.ilevel ? " files" : " runs")
+        << " --- score: " << storage_info_.GetScoreForLevel(i) << std::endl;
 
     int run_id = 0;
     for (const auto& sr : storage_info_.LevelRuns(i)) {
-      std::cout << "\tRun #" << (++run_id) << " [# files: " << sr.size() << "]"
+      std::cout << "\trun " << (++run_id) << " [num files:" << sr.size() << "]"
                 << std::endl;
 
-      for (const auto& fm : sr) {
-        if (fm->num_entries == 0) {
-          const ReadOptions read_options;
-          const auto& ioptions = cfd_->ioptions();
+      for (auto& fm : sr) {
+        uint64_t num_entries = fm->num_entries;
+        if (num_entries == 0) {
+          std::shared_ptr<const TableProperties> tp;
+          Status s = cfd_->table_cache()->GetTableProperties(
+              file_options_, ro, cfd_->internal_comparator(), *fm, &tp,
+              mutable_cf_opts, false /*no io*/
+          );
 
-          std::string file_name = TableFileName(
-              ioptions.cf_paths, fm->fd.GetNumber(), fm->fd.GetPathId());
-
-          std::unique_ptr<FSRandomAccessFile> file;
-          Status s = ioptions.fs->NewRandomAccessFile(file_name, file_options_,
-                                                      &file, nullptr);
-          assert(s.ok());
-          auto file_reader = std::make_unique<RandomAccessFileReader>(
-              std::move(file), file_name, ioptions.clock, io_tracer_,
-              ioptions.stats, Histograms::SST_READ_MICROS, nullptr, nullptr,
-              ioptions.listeners);
-
-          std::unique_ptr<TableProperties> props;
-          s = ReadTableProperties(
-              file_reader.get(), fm->fd.GetFileSize(),
-              Footer::kNullTableMagicNumber /* table's magic number */,
-              ioptions, read_options, &props);
-
-          assert(s.ok());
-
-          fm->num_entries = props->num_entries;
+          assert(s.ok() && tp != nullptr);
+          num_entries = tp->num_entries;
         }
+
         std::cout << "\t\t[#" << fm->fd.GetNumber() << ":" << fm->fd.file_size
-                  << " (" << fm->smallest.user_key().ToString() << ", "
-                  << fm->largest.user_key().ToString() << ") "
-                  << fm->num_entries << " | " << fm->fd.smallest_seqno << ":"
+                  << " bytes (key:" << fm->smallest.user_key().ToString()
+                  << " ... " << fm->largest.user_key().ToString()
+                  << ") total:" << num_entries
+                  << " | seq:" << fm->fd.smallest_seqno << " ... "
                   << fm->fd.largest_seqno << "]" << std::endl;
       }
     }
@@ -3576,7 +3584,7 @@ void VersionStorageInfo::ComputeCompactionScore(
                 mutable_cf_options.level0_file_num_compaction_trigger;
         if (compaction_style_ == kCompactionStyleiLevel) {
           score = static_cast<double>(sorted_runs_per_level_[level].size()) /
-                  mutable_cf_options.fluidlsm_policy->NumRuns(level);
+                  mutable_cf_options.fluidlsm_policy->GetNumRuns(level);
         } else if (compaction_style_ == kCompactionStyleLevel &&
                    num_levels() > 1) {
           // Level-based involves L0->L0 compactions that can lead to oversized
@@ -4827,15 +4835,13 @@ void VersionStorageInfo::CalculateBaseBytes(const ImmutableOptions& ioptions,
       if (i == 0 && ioptions.compaction_style == kCompactionStyleUniversal) {
         level_max_bytes_[i] = options.max_bytes_for_level_base;
       } else if (i >= 1) {
-        double level_ratio =
-            (compaction_style_ == kCompactionStyleiLevel)
-                ? options.fluidlsm_policy->SizeRatio(i - 1)
-                : options.max_bytes_for_level_multiplier;
+        double level_ratio = (compaction_style_ == kCompactionStyleiLevel)
+                                 ? options.fluidlsm_policy->GetSizeRatio(i - 1)
+                                 : options.max_bytes_for_level_multiplier;
 
-        level_max_bytes_[i] =
-            MultiplyCheckOverflow(MultiplyCheckOverflow(level_max_bytes_[i - 1],
-                                                        level_ratio),
-                                  options.MaxBytesMultiplerAdditional(i - 1));
+        level_max_bytes_[i] = MultiplyCheckOverflow(
+            MultiplyCheckOverflow(level_max_bytes_[i - 1], level_ratio),
+            options.MaxBytesMultiplerAdditional(i - 1));
       } else {
         level_max_bytes_[i] = options.max_bytes_for_level_base;
       }
@@ -4876,10 +4882,9 @@ void VersionStorageInfo::CalculateBaseBytes(const ImmutableOptions& ioptions,
       uint64_t base_bytes_max = options.max_bytes_for_level_base;
       double smallest = 0;
       for (int i = 0; i < num_levels_; i++) {
-        double level_ratio =
-            (compaction_style_ == kCompactionStyleiLevel)
-                ? options.fluidlsm_policy->SizeRatio(i)
-                : options.max_bytes_for_level_multiplier;
+        double level_ratio = (compaction_style_ == kCompactionStyleiLevel)
+                                 ? options.fluidlsm_policy->GetSizeRatio(i)
+                                 : options.max_bytes_for_level_multiplier;
         if (level_ratio < smallest) {
           smallest = level_ratio;
         }
@@ -4890,13 +4895,11 @@ void VersionStorageInfo::CalculateBaseBytes(const ImmutableOptions& ioptions,
       // Try whether we can make last level's target size to be max_level_size
       uint64_t cur_level_size = max_level_size;
       for (int i = num_levels_ - 2; i >= first_non_empty_level; i--) {
-        double level_ratio =
-            (compaction_style_ == kCompactionStyleiLevel)
-                ? options.fluidlsm_policy->SizeRatio(i)
-                : options.max_bytes_for_level_multiplier;
+        double level_ratio = (compaction_style_ == kCompactionStyleiLevel)
+                                 ? options.fluidlsm_policy->GetSizeRatio(i)
+                                 : options.max_bytes_for_level_multiplier;
         // Round up after dividing
-        cur_level_size =
-            static_cast<uint64_t>(cur_level_size / level_ratio);
+        cur_level_size = static_cast<uint64_t>(cur_level_size / level_ratio);
         if (lowest_unnecessary_level_ == -1 &&
             cur_level_size <= base_bytes_min &&
             (options.preclude_last_level_data_seconds == 0 ||
@@ -4936,12 +4939,11 @@ void VersionStorageInfo::CalculateBaseBytes(const ImmutableOptions& ioptions,
         base_level_ = first_non_empty_level;
         while (base_level_ > 1 && cur_level_size > base_bytes_max) {
           double level_ratio =
-            (compaction_style_ == kCompactionStyleiLevel)
-                ? options.fluidlsm_policy->SizeRatio(base_level_)
-                : options.max_bytes_for_level_multiplier;
+              (compaction_style_ == kCompactionStyleiLevel)
+                  ? options.fluidlsm_policy->GetSizeRatio(base_level_)
+                  : options.max_bytes_for_level_multiplier;
           --base_level_;
-          cur_level_size = static_cast<uint64_t>(
-              cur_level_size / level_ratio);
+          cur_level_size = static_cast<uint64_t>(cur_level_size / level_ratio);
         }
         if (cur_level_size > base_bytes_max) {
           // Even L1 will be too large
@@ -4958,10 +4960,9 @@ void VersionStorageInfo::CalculateBaseBytes(const ImmutableOptions& ioptions,
       uint64_t level_size = base_level_size;
       for (int i = base_level_; i < num_levels_; i++) {
         if (i > base_level_) {
-          double level_ratio =
-            (compaction_style_ == kCompactionStyleiLevel)
-                ? options.fluidlsm_policy->SizeRatio(i)
-                : options.max_bytes_for_level_multiplier;
+          double level_ratio = (compaction_style_ == kCompactionStyleiLevel)
+                                   ? options.fluidlsm_policy->GetSizeRatio(i)
+                                   : options.max_bytes_for_level_multiplier;
           level_size = MultiplyCheckOverflow(level_size, level_ratio);
         }
         // Don't set any level below base_bytes_max. Otherwise, the LSM can

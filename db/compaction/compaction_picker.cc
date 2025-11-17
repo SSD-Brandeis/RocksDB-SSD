@@ -145,13 +145,13 @@ void CompactionPicker::ReleaseCompactionFiles(Compaction* c,
 
 void CompactionPicker::GetRange(const CompactionInputFiles& inputs,
                                 InternalKey* smallest,
-                                InternalKey* largest) const {
+                                InternalKey* largest, int ilevel) const {
   const int level = inputs.level;
   assert(!inputs.empty());
   smallest->Clear();
   largest->Clear();
 
-  if (level == 0) {
+  if (level == ilevel) {
     for (size_t i = 0; i < inputs.size(); i++) {
       FileMetaData* f = inputs[i];
       if (i == 0) {
@@ -483,7 +483,7 @@ bool CompactionPicker::SetupOtherInputs(
   InternalKey smallest, largest;
 
   // Get the range one last time.
-  GetRange(*inputs, &smallest, &largest);
+  GetRange(*inputs, &smallest, &largest, mutable_cf_options.ilevel);
 
   // Populate the set of next-level files (inputs_GetOutputLevelInputs()) to
   // include in compaction

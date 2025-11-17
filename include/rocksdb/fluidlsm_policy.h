@@ -13,10 +13,10 @@ class FluidLSMPolicy {
   virtual ~FluidLSMPolicy() = default;
 
   // Returns the size ratio from the given level
-  virtual double SizeRatio(int level) const = 0;
+  virtual double GetSizeRatio(int level) const = 0;
 
   // Rrturns the number of runs a levels can hold
-  virtual double NumRuns(int level) const = 0;
+  virtual double GetNumRuns(int level) const = 0;
 
   virtual const char* Name() const = 0;
 };
@@ -27,8 +27,8 @@ class LeveledLSMPolicy : public FluidLSMPolicy {
  public:
   LeveledLSMPolicy(int size_ratio) : size_ratio_(size_ratio) {}
 
-  double SizeRatio(int level) const override { return size_ratio_; }
-  double NumRuns(int level) const override { return 1; }
+  double GetSizeRatio(int level) const override { return size_ratio_; }
+  double GetNumRuns(int level) const override { return 1; }
   const char* Name() const { return "LeveledLSMPolicy"; }
 
  private:

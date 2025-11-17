@@ -609,6 +609,19 @@ class VersionStorageInfo {
     return internal_comparator_;
   }
 
+#ifdef PROFILE
+  // Get score of a particular level
+  // only used for printing purpose
+  double GetScoreForLevel(int lvl) {
+    for (size_t i = 0; i < compaction_level_.size(); ++i) {
+      if (compaction_level_[i] == lvl) {
+        return compaction_score_[i];
+      }
+    }
+    return 0;
+  }
+#endif  // PROFILE
+
   // Returns maximum total bytes of data on a given level.
   uint64_t MaxBytesForLevel(int level) const;
 
@@ -1070,7 +1083,7 @@ class Version {
   InternalIterator* TEST_GetLevelIterator(
       const ReadOptions& read_options, MergeIteratorBuilder* merge_iter_builder,
       int level, bool allow_unprepared_value);
-  
+
   void PrintFullTreeSummary();
 
  private:

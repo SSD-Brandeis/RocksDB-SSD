@@ -148,7 +148,7 @@ class CompactionPicker {
   // *smallest, *largest.
   // REQUIRES: inputs is not empty
   void GetRange(const CompactionInputFiles& inputs, InternalKey* smallest,
-                InternalKey* largest) const;
+                InternalKey* largest, int ilevel = 0) const;
 
   // Stores the minimal range that covers all entries in inputs1 and inputs2
   // in *smallest, *largest.
