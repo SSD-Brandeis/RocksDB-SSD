@@ -1607,7 +1607,7 @@ void Version::PrintFullTreeSummary() {
                           mutable_cf_options_.fluidlsm_policy->GetNumRuns(i)))
         << ")"
         << (ioptions.compaction_style == CompactionStyle::kCompactionStyleiLevel
-                ? "--- granularity: " +
+                ? " --- granularity: " +
                       std::to_string(mutable_cf_options_.level_compaction_granularity
                                          ->PickCompactionCount(i)) +
                       (i > mutable_cf_options_.ilevel ? " files" : " runs")
@@ -2107,18 +2107,18 @@ void Version::AddIteratorsForLevel(const ReadOptions& read_options,
   bool should_sample = should_sample_file_read();
 
   auto* arena = merge_iter_builder->GetArena();
-  if (level <= mutable_cf_options_.ilevel) {
+  if (level == 0) {
     // Merge all level zero files together since they may overlap
     std::unique_ptr<TruncatedRangeDelIterator> tombstone_iter = nullptr;
-    for (size_t i = 0; i < storage_info_.LevelFilesBrief(level).num_files;
+    for (size_t i = 0; i < storage_info_.LevelFilesBrief(0).num_files;
          i++) {
-      const auto& file = storage_info_.LevelFilesBrief(level).files[i];
+      const auto& file = storage_info_.LevelFilesBrief(0).files[i];
       auto table_iter = cfd_->table_cache()->NewIterator(
           read_options, soptions, cfd_->internal_comparator(),
           *file.file_metadata, /*range_del_agg=*/nullptr, mutable_cf_options_,
-          nullptr, cfd_->internal_stats()->GetFileReadHist(level),
+          nullptr, cfd_->internal_stats()->GetFileReadHist(0),
           TableReaderCaller::kUserIterator, arena,
-          /*skip_filters=*/false, /*level=*/level,
+          /*skip_filters=*/false, /*level=*/0,
           max_file_size_for_l0_meta_pin_,
           /*smallest_compaction_key=*/nullptr,
           /*largest_compaction_key=*/nullptr, allow_unprepared_value,
@@ -2180,10 +2180,10 @@ Status Version::OverlapWithLevelIterator(const ReadOptions& read_options,
 
   *overlap = false;
 
-  if (level <= mutable_cf_options_.ilevel) {
-    for (size_t i = 0; i < storage_info_.LevelFilesBrief(level).num_files;
+  if (level == 0) {
+    for (size_t i = 0; i < storage_info_.LevelFilesBrief(0).num_files;
          i++) {
-      const auto file = &storage_info_.LevelFilesBrief(level).files[i];
+      const auto file = &storage_info_.LevelFilesBrief(0).files[i];
       if (AfterFile(ucmp, &smallest_user_key, file) ||
           BeforeFile(ucmp, &largest_user_key, file)) {
         continue;
@@ -2191,9 +2191,9 @@ Status Version::OverlapWithLevelIterator(const ReadOptions& read_options,
       ScopedArenaPtr<InternalIterator> iter(cfd_->table_cache()->NewIterator(
           read_options, file_options, cfd_->internal_comparator(),
           *file->file_metadata, &range_del_agg, mutable_cf_options_, nullptr,
-          cfd_->internal_stats()->GetFileReadHist(level),
+          cfd_->internal_stats()->GetFileReadHist(0),
           TableReaderCaller::kUserIterator, &arena,
-          /*skip_filters=*/false, /*level=*/level,
+          /*skip_filters=*/false, /*level=*/0,
           max_file_size_for_l0_meta_pin_,
           /*smallest_compaction_key=*/nullptr,
           /*largest_compaction_key=*/nullptr,
