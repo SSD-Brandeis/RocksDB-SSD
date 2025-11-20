@@ -19,7 +19,7 @@
 
 #include <chrono>
 #include <iostream>
-// #define TIMER
+#define TIMER
 namespace ROCKSDB_NAMESPACE {
 namespace {
 
@@ -197,7 +197,8 @@ void VectorRep::Insert(KeyHandle handle) {
 #ifdef TIMER
   auto stop1 = std::chrono::high_resolution_clock::now();
   auto duration1 = std::chrono::duration_cast<std::chrono::nanoseconds>(stop1 - start);
-  std::cout << "Lock: " << duration1.count() << ", " << std::flush;
+  // std::cout << "Lock: " << duration1.count() << ", " << std::flush;
+  std::cout << "Lock: " << duration1.count() << ", ";
 #endif
     assert(!immutable_);
     bucket_->push_back(key);
@@ -206,8 +207,17 @@ void VectorRep::Insert(KeyHandle handle) {
 #ifdef TIMER
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - stop1);
-  std::cout << "VectorRep: " << duration.count() << ", " << std::flush;
+  // std::cout << "VectorRep: " << duration.count() << ", " << std::flush;
+  std::cout << "VectorRep: " << duration.count() << std::endl << std::flush;
 #endif
+  //ignore lock timing 
+// #ifdef TIMER
+//   auto stop = std::chrono::high_resolution_clock::now();
+//   auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+//     // std::cout << "VectorRep: " << duration.count() << ", " << std::flush;
+//   std::cout << "VectorRep: " << duration.count() << ", " << std::endl << std::flush;
+// #endif
+
 }
 
 void VectorRep::InsertConcurrently(KeyHandle handle) {
@@ -282,15 +292,12 @@ void VectorRep::Iterator::DoSort() const {
       vrep_->sorted_ = true;
     }
     sorted_ = true;
-
-    std::cout<<__LINE__<<"sort happen"<<std::endl<<std::flush;
   }
   if (!sorted_) {
     std::sort(bucket_->begin(), bucket_->end(),
               stl_wrappers::Compare(compare_));
     cit_ = bucket_->begin();
     sorted_ = true;
-    std::cout<<__LINE__<<"(empty) sort happen"<<std::endl<<std::flush;
   }
   assert(sorted_);
   assert(vrep_ == nullptr || vrep_->sorted_);
@@ -390,6 +397,7 @@ void VectorRep::Iterator::SeekToLast() {
 
 void VectorRep::Get(const LookupKey& k, void* callback_args,
                     bool (*callback_func)(void* arg, const char* entry)) {
+
   rwlock_.ReadLock();
   VectorRep* vector_rep;
   std::shared_ptr<Bucket> bucket;
@@ -617,7 +625,6 @@ public:
     void SeekForPrev(const Slice &internal_key, const char *memtable_key) override {
       assert(false);
     }
-
     void SeekToFirst() override {
       cit_ = bucket_->begin();
     }

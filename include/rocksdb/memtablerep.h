@@ -48,7 +48,7 @@
 
 #include <chrono>
 #include <iostream>
-// #define TIMER
+#define TIMER
 namespace ROCKSDB_NAMESPACE {
 
 class Arena;
