@@ -35,7 +35,7 @@
 
 #include <chrono>
 #include <iostream>
-// #define TIMER
+// #define GET_TIMER
 
 #if defined(__GNUC__) || defined(__clang__)
 #define ROCKSDB_DEPRECATED_FUNC __attribute__((__deprecated__))
@@ -730,6 +730,9 @@ class DB {
   virtual inline Status Get(const ReadOptions& options,
                             ColumnFamilyHandle* column_family, const Slice& key,
                             std::string* value) final {
+#ifdef GET_TIMER
+      auto start = std::chrono::high_resolution_clock::now();
+#endif // GET_TIMER                              
     assert(value != nullptr);
     PinnableSlice pinnable_val(value);
     assert(!pinnable_val.IsPinned());
@@ -737,6 +740,11 @@ class DB {
     if (s.ok() && pinnable_val.IsPinned()) {
       value->assign(pinnable_val.data(), pinnable_val.size());
     }  // else value is already assigned
+#ifdef GET_TIMER
+      auto stop = std::chrono::high_resolution_clock::now();
+      auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+      std::cout << "DB::" <<  __FUNCTION__ << ": " << duration.count() << std::endl << std::flush;
+#endif // GET_TIMER
     return s;
   }
 

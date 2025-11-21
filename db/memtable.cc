@@ -1372,6 +1372,9 @@ bool MemTable::Get(const LookupKey& key, std::string* value,
                    SequenceNumber* seq, const ReadOptions& read_opts,
                    bool immutable_memtable, ReadCallback* callback,
                    bool* is_blob_index, bool do_merge) {
+#ifdef GET_TIMER
+      auto start = std::chrono::high_resolution_clock::now();
+#endif // GET_TIMER
   // The sequence number is updated synchronously in version_set.h
   if (IsEmpty()) {
     // Avoiding recording stats for speed.
@@ -1430,7 +1433,12 @@ bool MemTable::Get(const LookupKey& key, std::string* value,
     GetFromTable(key, *max_covering_tombstone_seq, do_merge, callback,
                  is_blob_index, value, columns, timestamp, s, merge_context,
                  seq, &found_final_value, &merge_in_progress);
-  }
+#ifdef GET_TIMER
+      auto stop = std::chrono::high_resolution_clock::now();
+      auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+      std::cout << "MemTable::" << __FUNCTION__ << ": " << duration.count() << ", " << std::flush;
+#endif // GET_TIMER
+}
 
   // No change to value, since we have not yet found a Put/Delete
   // Propagate corruption error
@@ -1453,6 +1461,9 @@ void MemTable::GetFromTable(const LookupKey& key,
                             std::string* timestamp, Status* s,
                             MergeContext* merge_context, SequenceNumber* seq,
                             bool* found_final_value, bool* merge_in_progress) {
+#ifdef GET_TIMER
+      auto start = std::chrono::high_resolution_clock::now();
+#endif // GET_TIMER
   Saver saver;
   saver.status = s;
   saver.found_final_value = found_final_value;
@@ -1489,6 +1500,11 @@ void MemTable::GetFromTable(const LookupKey& key,
   }
   assert(s->ok() || s->IsMergeInProgress() || *found_final_value);
   *seq = saver.seq;
+#ifdef GET_TIMER
+      auto stop = std::chrono::high_resolution_clock::now();
+      auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+      std::cout << "MemTable::" << __FUNCTION__ << ": " << duration.count() << ", " << std::flush;
+#endif // GET_TIMER
 }
 
 void MemTable::MultiGet(const ReadOptions& read_options, MultiGetRange* range,

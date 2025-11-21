@@ -20,7 +20,7 @@
 
 #include <chrono>
 #include <iostream>
-#define TIMER
+// #define TIMER
 namespace ROCKSDB_NAMESPACE {
 // Convenience methods
 Status DBImpl::Put(const WriteOptions& o, ColumnFamilyHandle* column_family,

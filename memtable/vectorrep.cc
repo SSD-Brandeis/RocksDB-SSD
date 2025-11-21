@@ -19,7 +19,7 @@
 
 #include <chrono>
 #include <iostream>
-#define TIMER
+// #define TIMER
 namespace ROCKSDB_NAMESPACE {
 namespace {
 
@@ -297,7 +297,15 @@ void VectorRep::Iterator::Prev() {
 // Advance to the first entry with a key >= target
 void VectorRep::Iterator::Seek(const Slice& user_key,
                                const char* memtable_key) {
+#ifdef GET_TIMER
+      auto start = std::chrono::high_resolution_clock::now();
+#endif // GET_TIMER                                
   DoSort();
+#ifdef GET_TIMER
+      auto stop = std::chrono::high_resolution_clock::now();
+      auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+      std::cout << "VectorRep::" << __FUNCTION__ << ": " << duration.count() << ", " << std::flush;
+#endif // GET_TIMER
   // Do binary search to find first value not less than the target
   const char* encoded_key =
       (memtable_key != nullptr) ? memtable_key : EncodeKey(&tmp_, user_key);
@@ -333,7 +341,9 @@ void VectorRep::Iterator::SeekToLast() {
 
 void VectorRep::Get(const LookupKey& k, void* callback_args,
                     bool (*callback_func)(void* arg, const char* entry)) {
-
+#ifdef GET_TIMER
+      auto start = std::chrono::high_resolution_clock::now();
+#endif // GET_TIMER
   rwlock_.ReadLock();
   VectorRep* vector_rep;
   std::shared_ptr<Bucket> bucket;
@@ -349,6 +359,11 @@ void VectorRep::Get(const LookupKey& k, void* callback_args,
   for (iter.Seek(k.user_key(), k.memtable_key().data());
        iter.Valid() && callback_func(callback_args, iter.key()); iter.Next()) {
   }
+#ifdef GET_TIMER
+      auto stop = std::chrono::high_resolution_clock::now();
+      auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+      std::cout << "VectorRep::" << __FUNCTION__ << ": " << duration.count() << ", " << std::flush;
+#endif // GET_TIMER
 }
 
 MemTableRep::Iterator* VectorRep::GetIterator(Arena* arena) {
