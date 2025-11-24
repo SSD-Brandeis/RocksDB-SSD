@@ -29,7 +29,7 @@ class LeveledLSMPolicy : public FluidLSMPolicy {
 
   double GetSizeRatio(int level) const override { return size_ratio_; }
   double GetNumRuns(int level) const override { return 1; }
-  const char* Name() const { return "LeveledLSMPolicy"; }
+  const char* Name() const override { return "LeveledLSMPolicy"; }
 
  private:
   double size_ratio_;

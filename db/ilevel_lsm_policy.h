@@ -16,7 +16,7 @@ class ILevelLSMPolicy : public FluidLSMPolicy {
   explicit ILevelLSMPolicy(std::vector<double> level_size_ratio,
                            std::vector<double> level_num_runs, int num_levels,
                            double default_ratios);
-  const char* Name() const { return "ILevelLSMPolicy"; }
+  const char* Name() const override { return "ILevelLSMPolicy"; }
 
   double GetSizeRatio(int level) const override {
     if (level > static_cast<int>(size_ratio_.size()) - 1) {
@@ -53,7 +53,6 @@ class ILevelLSMPolicy : public FluidLSMPolicy {
  private:
   std::vector<double> size_ratio_{};
   std::vector<double> num_runs_{};
-  double default_ratio_;
 };
 
 const FluidLSMPolicy* NewFluidLSMPolicy(std::vector<double> level_size_ratio,

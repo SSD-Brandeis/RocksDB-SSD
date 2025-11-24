@@ -12,7 +12,7 @@ namespace ROCKSDB_NAMESPACE {
 class CompactionILevelRunPolicy : public CompactionRunPolicy {
  public:
   explicit CompactionILevelRunPolicy(std::vector<int> level_compaction_granularity);
-  const char* Name() const { return "CompactionILevelRunPolicy"; }
+  const char* Name() const override { return "CompactionILevelRunPolicy"; }
 
   int PickCompactionCount(int level) const override {
     if (level > static_cast<int>(level_compaction_granularity_.size()) - 1) {

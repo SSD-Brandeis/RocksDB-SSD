@@ -27,7 +27,7 @@ class CompactionRunPolicy {
 class FixedCompactionRunPolicy : public CompactionRunPolicy {
  public:
   int PickCompactionCount(int level) const override { return 1; }
-  const char* Name() const { return "FixedCompactionRunPolicy"; }
+  const char* Name() const override { return "FixedCompactionRunPolicy"; }
 };
 
 // policy per level is configuration through passed vector
