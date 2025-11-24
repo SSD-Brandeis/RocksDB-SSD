@@ -304,6 +304,7 @@ void VectorRep::Iterator::Seek(const Slice& user_key,
 #ifdef GET_TIMER
       auto stop = std::chrono::high_resolution_clock::now();
       auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+      // std::cout << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__ << ": " << duration.count() << ", " << std::flush;
       std::cout << "VectorRep::" << __FUNCTION__ << ": " << duration.count() << ", " << std::flush;
 #endif // GET_TIMER
   // Do binary search to find first value not less than the target
