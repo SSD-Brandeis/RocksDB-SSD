@@ -2139,6 +2139,55 @@ void Version::AddIteratorsForLevel(const ReadOptions& read_options,
         sample_file_read_inc(meta);
       }
     }
+  } else if (level <= mutable_cf_options_.ilevel &&
+             storage_info_.LevelFilesBrief(level).num_files > 0) {
+    // For levels <= ilevel, we have tiered layout with multiple sorted runs.
+    for (const auto& run : storage_info_.LevelRuns(level)) {
+      // Each run can be iterated with a LevelIterator since files in a run
+      // do not overlap.
+      std::vector<FdWithKeyRange> run_summary;
+      run_summary.reserve(run.size());
+
+      size_t num_files = run.size();
+      auto* ranges = reinterpret_cast<FdWithKeyRange*>(
+                arena->AllocateAligned(sizeof(FdWithKeyRange)* num_files));
+      for (int i = 0; i < static_cast<int>(run.size()); i++) {
+          new (&ranges[i]) FdWithKeyRange(
+            run.at(i)->fd,
+            run.at(i)->smallest.user_key(),
+            run.at(i)->largest.user_key(),
+            run.at(i)
+          );
+          run_summary.emplace_back(ranges[i]);
+      }
+
+      
+      //auto fd_key_range = new FdWithKeyRange(run.front()->fd, run.front()->smallest.user_key(), run.back()->largest.user_key(), run.front());
+
+      auto* run_mem = reinterpret_cast<SortedRunFilesBrief*>(
+          arena->AllocateAligned(sizeof(SortedRunFilesBrief)));
+
+      auto current = new (run_mem) SortedRunFilesBrief(num_files, run_summary.data());
+
+      auto* mem = arena->AllocateAligned(sizeof(LevelIterator));
+      std::unique_ptr<TruncatedRangeDelIterator>** tombstone_iter_ptr = nullptr;
+      auto level_iter = new (mem) LevelIterator(
+          cfd_->table_cache(), read_options, soptions,
+          cfd_->internal_comparator(), current, mutable_cf_options_,
+          should_sample_file_read(),
+          cfd_->internal_stats()->GetFileReadHist(level),
+          TableReaderCaller::kUserIterator, IsFilterSkipped(level), level,
+          /*range_del_agg=*/nullptr,
+          /*compaction_boundaries=*/nullptr, allow_unprepared_value,
+          &tombstone_iter_ptr);
+      if (read_options.ignore_range_deletions) {
+        merge_iter_builder->AddIterator(level_iter);
+      } else {
+        merge_iter_builder->AddPointAndTombstoneIterator(
+            level_iter, nullptr /* tombstone_iter */, tombstone_iter_ptr);
+      }
+    }
+
   } else if (storage_info_.LevelFilesBrief(level).num_files > 0) {
     // For levels > 0, we can use a concatenating iterator that sequentially
     // walks through the non-overlapping files in the level, opening them
@@ -7257,7 +7306,7 @@ InternalIterator* VersionSet::MakeInputIterator(
     const LevelFilesBrief* flevel = c->input_levels(which);
     num_input_files += flevel->num_files;
     if (flevel->num_files != 0) {
-      if (c->level(which) <= ilevel) {
+      if (c->level(which) <= ilevel) { //change later
         for (size_t i = 0; i < flevel->num_files; i++) {
           const FileMetaData& fmd = *flevel->files[i].file_metadata;
           if (start.has_value() &&
