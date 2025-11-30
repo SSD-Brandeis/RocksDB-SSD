@@ -2141,50 +2141,46 @@ void Version::AddIteratorsForLevel(const ReadOptions& read_options,
     }
   } else if (level <= mutable_cf_options_.ilevel &&
              storage_info_.LevelFilesBrief(level).num_files > 0) {
-    // For levels <= ilevel, we have tiered layout with multiple sorted runs.
     for (const auto& run : storage_info_.LevelRuns(level)) {
-      // Each run can be iterated with a LevelIterator since files in a run
-      // do not overlap.
-      std::vector<FdWithKeyRange> run_summary;
-      run_summary.reserve(run.size());
-
       size_t num_files = run.size();
       auto* ranges = reinterpret_cast<FdWithKeyRange*>(
-                arena->AllocateAligned(sizeof(FdWithKeyRange)* num_files));
-      for (int i = 0; i < static_cast<int>(run.size()); i++) {
-          new (&ranges[i]) FdWithKeyRange(
+          arena->AllocateAligned(sizeof(FdWithKeyRange) * num_files));
+
+      for (int i = 0; i < static_cast<int>(num_files); i++) {
+        new (&ranges[i]) FdWithKeyRange(
             run.at(i)->fd,
-            run.at(i)->smallest.user_key(),
-            run.at(i)->largest.user_key(),
-            run.at(i)
-          );
-          run_summary.emplace_back(ranges[i]);
+            run.at(i)->smallest.Encode(),
+            run.at(i)->largest.Encode(),
+            run.at(i));
       }
 
-      
-      //auto fd_key_range = new FdWithKeyRange(run.front()->fd, run.front()->smallest.user_key(), run.back()->largest.user_key(), run.front());
-
-      auto* run_mem = reinterpret_cast<SortedRunFilesBrief*>(
-          arena->AllocateAligned(sizeof(SortedRunFilesBrief)));
-
-      auto current = new (run_mem) SortedRunFilesBrief(num_files, run_summary.data());
+      auto* run_mem = reinterpret_cast<LevelFilesBrief*>(
+          arena->AllocateAligned(sizeof(LevelFilesBrief)));
+      new (run_mem) LevelFilesBrief(); 
+      run_mem->num_files = num_files;
+      run_mem->files = ranges;
 
       auto* mem = arena->AllocateAligned(sizeof(LevelIterator));
-      std::unique_ptr<TruncatedRangeDelIterator>** tombstone_iter_ptr = nullptr;
+      using TruncRangeDelIter = std::unique_ptr<TruncatedRangeDelIterator>;
+      auto* tombstone_iter_ptr_storage = 
+          new (arena->AllocateAligned(sizeof(TruncRangeDelIter*))) (TruncRangeDelIter*);
+      *tombstone_iter_ptr_storage = nullptr;
+
       auto level_iter = new (mem) LevelIterator(
           cfd_->table_cache(), read_options, soptions,
-          cfd_->internal_comparator(), current, mutable_cf_options_,
+          cfd_->internal_comparator(), run_mem, mutable_cf_options_,
           should_sample_file_read(),
           cfd_->internal_stats()->GetFileReadHist(level),
           TableReaderCaller::kUserIterator, IsFilterSkipped(level), level,
-          /*range_del_agg=*/nullptr,
-          /*compaction_boundaries=*/nullptr, allow_unprepared_value,
-          &tombstone_iter_ptr);
+          nullptr,
+          nullptr, allow_unprepared_value,
+          &tombstone_iter_ptr_storage);
+
       if (read_options.ignore_range_deletions) {
         merge_iter_builder->AddIterator(level_iter);
       } else {
         merge_iter_builder->AddPointAndTombstoneIterator(
-            level_iter, nullptr /* tombstone_iter */, tombstone_iter_ptr);
+            level_iter, nullptr, tombstone_iter_ptr_storage);
       }
     }
 
