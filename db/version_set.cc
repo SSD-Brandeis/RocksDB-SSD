@@ -156,6 +156,7 @@ class FilePicker {
              const int ilevel = 0)
       : num_levels_(num_levels),
         curr_level_(static_cast<unsigned int>(-1)),
+        curr_tier_(static_cast<unsigned int>(-1)),
         returned_file_level_(static_cast<unsigned int>(-1)),
         hit_file_level_(static_cast<unsigned int>(-1)),
         search_left_bound_(0),
@@ -206,7 +207,7 @@ class FilePicker {
           // Check if key is within a file's range. If search left bound and
           // right bound point to the same find, we are sure key falls in
           // range.
-          assert(curr_level_ <= ilevel_ ||
+          assert(curr_level_ == 0 ||
                  curr_index_in_curr_level_ == start_index_in_curr_level_ ||
                  user_comparator_->CompareWithoutTimestamp(
                      user_key_, ExtractUserKey(f->smallest_key)) <= 0);
@@ -227,7 +228,7 @@ class FilePicker {
           }
           // Key falls out of current file's range
           if (cmp_smallest < 0 || cmp_largest > 0) {
-            if (curr_level_ <= ilevel_) {
+            if (curr_level_ == 0) {
               ++curr_index_in_curr_level_;
               continue;
             } else {
@@ -238,7 +239,7 @@ class FilePicker {
         }
 
         returned_file_level_ = curr_level_;
-        if (curr_level_ > ilevel_ && cmp_largest < 0) {
+        if (curr_level_ > 0 && cmp_largest < 0) {
           // No more files to search in this level.
           search_ended_ = !PrepareNextLevel();
         } else {
@@ -264,6 +265,7 @@ class FilePicker {
  private:
   unsigned int num_levels_;
   unsigned int curr_level_;
+  unsigned int curr_tier_;
   unsigned int returned_file_level_;
   unsigned int hit_file_level_;
   int32_t search_left_bound_;
@@ -281,10 +283,35 @@ class FilePicker {
   const InternalKeyComparator* internal_comparator_;
   const unsigned int ilevel_;
 
+  void UpdateTierBasedInfo() {
+    if (curr_level_ == 0 || curr_level_ > num_levels_) {
+      return;
+    }
+
+    auto& levels = *level_files_brief_;
+
+    if (curr_level_ > 1 && curr_level_ - 1 < num_levels_ &&
+        curr_tier_ + 1 < levels[curr_level_ - 1].num_tiers) {
+      curr_level_--;
+      curr_tier_++;
+      search_left_bound_ = search_right_bound_ + 1;
+      search_right_bound_ = levels[curr_level_].tier_end_index[curr_tier_];
+    } else if (curr_level_ < num_levels_) {
+      curr_tier_ = 0;
+      search_left_bound_ = 0;
+      if (levels[curr_level_].num_tiers == 0) {
+        search_right_bound_ = FileIndexer::kLevelMaxIndex;
+      } else {
+        search_right_bound_ = levels[curr_level_].tier_end_index[curr_tier_];
+      }
+    }
+  }
+
   // Setup local variables to search next level.
   // Returns false if there are no more levels to search.
   bool PrepareNextLevel() {
     curr_level_++;
+    UpdateTierBasedInfo();
     while (curr_level_ < num_levels_) {
       curr_file_level_ = &(*level_files_brief_)[curr_level_];
       if (curr_file_level_->num_files == 0) {
@@ -299,6 +326,7 @@ class FilePicker {
         search_left_bound_ = 0;
         search_right_bound_ = FileIndexer::kLevelMaxIndex;
         curr_level_++;
+        UpdateTierBasedInfo();
         continue;
       }
 
@@ -308,8 +336,8 @@ class FilePicker {
       // any level. Otherwise, it only occurs at Level-0 (since Put/Deletes
       // are always compacted into a single entry).
       int32_t start_index;
-      if (curr_level_ <= ilevel_) {
-        // On Level-0/iLevels, we read through all files to check for overlap.
+      if (curr_level_ == 0) {
+        // On Level-0, we read through all files to check for overlap.
         start_index = 0;
       } else {
         // On Level-n (n>=1), files are sorted. Binary search to find the
@@ -335,6 +363,7 @@ class FilePicker {
             search_left_bound_ = 0;
             search_right_bound_ = FileIndexer::kLevelMaxIndex;
             curr_level_++;
+            UpdateTierBasedInfo();
             continue;
           }
         } else {
@@ -344,6 +373,7 @@ class FilePicker {
           search_left_bound_ = 0;
           search_right_bound_ = FileIndexer::kLevelMaxIndex;
           curr_level_++;
+          UpdateTierBasedInfo();
           continue;
         }
       }
@@ -891,7 +921,8 @@ int FindFile(const InternalKeyComparator& icmp,
 
 void DoGenerateLevelFilesBrief(LevelFilesBrief* file_level,
                                const std::vector<FileMetaData*>& files,
-                               Arena* arena) {
+                               Arena* arena,
+                               const std::vector<SortedRun> runs) {
   assert(file_level);
   assert(arena);
 
@@ -916,6 +947,17 @@ void DoGenerateLevelFilesBrief(LevelFilesBrief* file_level,
     f.file_metadata = files[i];
     f.smallest_key = Slice(mem, smallest_size);
     f.largest_key = Slice(mem + smallest_size, largest_size);
+  }
+
+  if (!runs.empty()) {
+    file_level->num_tiers = runs.size();
+    file_level->tier_end_index = reinterpret_cast<int*>(
+        arena->AllocateAligned(runs.size() * sizeof(int)));
+    size_t idx = 0;
+    for (size_t i = 0; i < runs.size(); i++) {
+      file_level->tier_end_index[i] = runs[i].size() + idx - 1;
+      idx += runs[i].size();
+    }
   }
 }
 
@@ -1608,8 +1650,9 @@ void Version::PrintFullTreeSummary() {
         << ")"
         << (ioptions.compaction_style == CompactionStyle::kCompactionStyleiLevel
                 ? " --- granularity: " +
-                      std::to_string(mutable_cf_options_.level_compaction_granularity
-                                         ->PickCompactionCount(i)) +
+                      std::to_string(
+                          mutable_cf_options_.level_compaction_granularity
+                              ->PickCompactionCount(i)) +
                       (i > mutable_cf_options_.ilevel ? " files" : " runs")
                 : "")
         << " --- score: " << storage_info_.GetScoreForLevel(i) << std::endl;
@@ -2110,16 +2153,14 @@ void Version::AddIteratorsForLevel(const ReadOptions& read_options,
   if (level == 0) {
     // Merge all level zero files together since they may overlap
     std::unique_ptr<TruncatedRangeDelIterator> tombstone_iter = nullptr;
-    for (size_t i = 0; i < storage_info_.LevelFilesBrief(0).num_files;
-         i++) {
+    for (size_t i = 0; i < storage_info_.LevelFilesBrief(0).num_files; i++) {
       const auto& file = storage_info_.LevelFilesBrief(0).files[i];
       auto table_iter = cfd_->table_cache()->NewIterator(
           read_options, soptions, cfd_->internal_comparator(),
           *file.file_metadata, /*range_del_agg=*/nullptr, mutable_cf_options_,
           nullptr, cfd_->internal_stats()->GetFileReadHist(0),
           TableReaderCaller::kUserIterator, arena,
-          /*skip_filters=*/false, /*level=*/0,
-          max_file_size_for_l0_meta_pin_,
+          /*skip_filters=*/false, /*level=*/0, max_file_size_for_l0_meta_pin_,
           /*smallest_compaction_key=*/nullptr,
           /*largest_compaction_key=*/nullptr, allow_unprepared_value,
           /*range_del_read_seqno=*/nullptr, &tombstone_iter);
@@ -2226,8 +2267,7 @@ Status Version::OverlapWithLevelIterator(const ReadOptions& read_options,
   *overlap = false;
 
   if (level == 0) {
-    for (size_t i = 0; i < storage_info_.LevelFilesBrief(0).num_files;
-         i++) {
+    for (size_t i = 0; i < storage_info_.LevelFilesBrief(0).num_files; i++) {
       const auto file = &storage_info_.LevelFilesBrief(0).files[i];
       if (AfterFile(ucmp, &smallest_user_key, file) ||
           BeforeFile(ucmp, &largest_user_key, file)) {
@@ -2238,8 +2278,7 @@ Status Version::OverlapWithLevelIterator(const ReadOptions& read_options,
           *file->file_metadata, &range_del_agg, mutable_cf_options_, nullptr,
           cfd_->internal_stats()->GetFileReadHist(0),
           TableReaderCaller::kUserIterator, &arena,
-          /*skip_filters=*/false, /*level=*/0,
-          max_file_size_for_l0_meta_pin_,
+          /*skip_filters=*/false, /*level=*/0, max_file_size_for_l0_meta_pin_,
           /*smallest_compaction_key=*/nullptr,
           /*largest_compaction_key=*/nullptr,
           /*allow_unprepared_value=*/false));
@@ -3201,7 +3240,7 @@ void VersionStorageInfo::GenerateLevelFilesBrief() {
   level_files_brief_.resize(num_non_empty_levels_);
   for (int level = 0; level < num_non_empty_levels_; level++) {
     DoGenerateLevelFilesBrief(&level_files_brief_[level], files_[level],
-                              &arena_);
+                              &arena_, sorted_runs_per_level_[level]);
   }
 }
 

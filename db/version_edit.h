@@ -406,10 +406,14 @@ struct FdWithKeyRange {
 // Actual data is guaranteed to be stored closely
 struct LevelFilesBrief {
   size_t num_files;
+  size_t num_tiers;
   FdWithKeyRange* files;
+  int* tier_end_index;
   LevelFilesBrief() {
     num_files = 0;
+    num_tiers = 0;
     files = nullptr;
+    tier_end_index = nullptr;
   }
 };
 

@@ -120,7 +120,7 @@ bool SomeFileOverlapsRange(const InternalKeyComparator& icmp,
 // arena: Arena used to allocate the memory
 void DoGenerateLevelFilesBrief(LevelFilesBrief* file_level,
                                const std::vector<FileMetaData*>& files,
-                               Arena* arena);
+                               Arena* arena, const std::vector<SortedRun> runs = {});
 enum EpochNumberRequirement {
   kMightMissing,
   kMustPresent,

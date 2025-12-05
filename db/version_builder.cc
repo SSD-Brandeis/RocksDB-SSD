@@ -1589,7 +1589,7 @@ class VersionBuilder::Rep {
     for (const auto& pair : unordered_added_files) {
       added_files.push_back(pair.second);
     }
-    std::sort(added_files.begin(), added_files.end(), cmp);
+    std::sort(added_files.begin(), added_files.end(), *level_nonzero_cmp_);
 
     auto base_iter = base_files.begin();
     auto base_end = base_files.end();
