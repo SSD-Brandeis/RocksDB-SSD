@@ -2180,48 +2180,53 @@ void Version::AddIteratorsForLevel(const ReadOptions& read_options,
         sample_file_read_inc(meta);
       }
     }
-  } else if (level <= mutable_cf_options_.ilevel &&
-             storage_info_.LevelFilesBrief(level).num_files > 0) {
-    for (const auto& run : storage_info_.LevelRuns(level)) {
-      size_t num_files = run.size();
-      auto* ranges = reinterpret_cast<FdWithKeyRange*>(
-          arena->AllocateAligned(sizeof(FdWithKeyRange) * num_files));
+  } else if (cfd_->ioptions().compaction_style ==
+                 CompactionStyle::kCompactionStyleiLevel &&
+             level <= mutable_cf_options_.ilevel &&
+             storage_info_.LevelFilesBrief(level).num_tiers > 0) {
+    auto num_tiers = storage_info_.NumLevelRuns(level);
+    autovector<ROCKSDB_NAMESPACE::LevelFilesBrief> runs_files_brief_;
+    runs_files_brief_.resize(num_tiers);
 
-      for (int i = 0; i < static_cast<int>(num_files); i++) {
-        new (&ranges[i]) FdWithKeyRange(
-            run.at(i)->fd,
-            run.at(i)->smallest.Encode(),
-            run.at(i)->largest.Encode(),
-            run.at(i));
+    // For tiered levels, we need to create one LevelIterator per run.
+    for (int run_idx = 0; run_idx < num_tiers; run_idx++) {
+      auto run_brief_ = &runs_files_brief_[run_idx];
+      const auto& run = storage_info_.LevelRuns(level)[run_idx];
+      size_t num = run.size();
+      run_brief_->num_files = num;
+      char* mem = arena->AllocateAligned(num * sizeof(FdWithKeyRange));
+      run_brief_->files = new (mem) FdWithKeyRange[num];
+
+      for (size_t i = 0; i < num; i++) {
+        Slice smallest_key = run[i]->smallest.Encode();
+        Slice largest_key = run[i]->largest.Encode();
+        size_t smallest_size = smallest_key.size();
+        size_t largest_size = largest_key.size();
+        mem = arena->AllocateAligned(smallest_size + largest_size);
+        memcpy(mem, smallest_key.data(), smallest_size);
+        memcpy(mem + smallest_size, largest_key.data(), largest_size);
+
+        FdWithKeyRange& f = run_brief_->files[i];
+        f.fd = run[i]->fd;
+        f.file_metadata = run[i];
+        f.smallest_key = Slice(mem, smallest_size);
+        f.largest_key = Slice(mem + smallest_size, largest_size);
       }
-
-      auto* run_mem = reinterpret_cast<LevelFilesBrief*>(
-          arena->AllocateAligned(sizeof(LevelFilesBrief)));
-      new (run_mem) LevelFilesBrief(); 
-      run_mem->num_files = num_files;
-      run_mem->files = ranges;
-
-      auto* mem = arena->AllocateAligned(sizeof(LevelIterator));
-      using TruncRangeDelIter = std::unique_ptr<TruncatedRangeDelIterator>;
-      auto* tombstone_iter_ptr_storage = 
-          new (arena->AllocateAligned(sizeof(TruncRangeDelIter*))) (TruncRangeDelIter*);
-      *tombstone_iter_ptr_storage = nullptr;
-
-      auto level_iter = new (mem) LevelIterator(
+      auto* mem_level_iter = arena->AllocateAligned(sizeof(LevelIterator));
+      std::unique_ptr<TruncatedRangeDelIterator>** tombstone_iter_ptr = nullptr;
+      auto run_iter = new (mem_level_iter) LevelIterator(
           cfd_->table_cache(), read_options, soptions,
-          cfd_->internal_comparator(), run_mem, mutable_cf_options_,
+          cfd_->internal_comparator(), run_brief_, mutable_cf_options_,
           should_sample_file_read(),
           cfd_->internal_stats()->GetFileReadHist(level),
           TableReaderCaller::kUserIterator, IsFilterSkipped(level), level,
-          nullptr,
-          nullptr, allow_unprepared_value,
-          &tombstone_iter_ptr_storage);
+          nullptr, nullptr, allow_unprepared_value, &tombstone_iter_ptr);
 
       if (read_options.ignore_range_deletions) {
-        merge_iter_builder->AddIterator(level_iter);
+        merge_iter_builder->AddIterator(run_iter);
       } else {
-        merge_iter_builder->AddPointAndTombstoneIterator(
-            level_iter, nullptr, tombstone_iter_ptr_storage);
+        merge_iter_builder->AddPointAndTombstoneIterator(run_iter, nullptr,
+                                                         tombstone_iter_ptr);
       }
     }
 
@@ -7341,7 +7346,7 @@ InternalIterator* VersionSet::MakeInputIterator(
     const LevelFilesBrief* flevel = c->input_levels(which);
     num_input_files += flevel->num_files;
     if (flevel->num_files != 0) {
-      if (c->level(which) <= ilevel) { //change later
+      if (c->level(which) <= ilevel) {  // change later
         for (size_t i = 0; i < flevel->num_files; i++) {
           const FileMetaData& fmd = *flevel->files[i].file_metadata;
           if (start.has_value() &&

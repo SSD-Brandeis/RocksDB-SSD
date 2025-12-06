@@ -417,12 +417,6 @@ struct LevelFilesBrief {
   }
 };
 
-struct SortedRunFilesBrief : LevelFilesBrief {
-  SortedRunFilesBrief(size_t num_files_, FdWithKeyRange* files_){
-    this->num_files = num_files_;
-    this->files = files_;
-  }
-};
 
 // The state of a DB at any given time is referred to as a Version.
 // Any modification to the Version is considered a Version Edit. A Version is
