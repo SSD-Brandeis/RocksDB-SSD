@@ -2185,12 +2185,10 @@ void Version::AddIteratorsForLevel(const ReadOptions& read_options,
              level <= mutable_cf_options_.ilevel &&
              storage_info_.LevelFilesBrief(level).num_tiers > 0) {
     auto num_tiers = storage_info_.NumLevelRuns(level);
-    autovector<ROCKSDB_NAMESPACE::LevelFilesBrief> runs_files_brief_;
-    runs_files_brief_.resize(num_tiers);
 
     // For tiered levels, we need to create one LevelIterator per run.
     for (int run_idx = 0; run_idx < num_tiers; run_idx++) {
-      auto run_brief_ = &runs_files_brief_[run_idx];
+      LevelFilesBrief* run_brief_ = new LevelFilesBrief();
       const auto& run = storage_info_.LevelRuns(level)[run_idx];
       size_t num = run.size();
       run_brief_->num_files = num;
@@ -5143,7 +5141,7 @@ bool VersionStorageInfo::RangeMightExistAfterSortedRun(
       return true;
     }
   }
-  return false;
+  return (files_[last_level].size() == 0) ? false : true;
 }
 
 Env::WriteLifeTimeHint VersionStorageInfo::CalculateSSTWriteHint(
