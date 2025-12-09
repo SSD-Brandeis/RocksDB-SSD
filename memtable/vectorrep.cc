@@ -8,6 +8,7 @@
 #include <set>
 #include <type_traits>
 #include <unordered_set>
+#include <limits>
 
 #include "db/memtable.h"
 #include "memory/arena.h"
@@ -94,7 +95,6 @@ class VectorRep : public MemTableRep {
     void SeekToLast() override;
   };
 
-  // Return an iterator over the keys in this representation.
   MemTableRep::Iterator* GetIterator(Arena* arena) override;
 
  protected:
@@ -107,6 +107,9 @@ class VectorRep : public MemTableRep {
   const KeyComparator& compare_;
 };
 
+// -------------------------------------------------------------------------
+// UnsortedVectorRep
+// -------------------------------------------------------------------------
 class UnsortedVectorRep : public VectorRep {
  public:
   UnsortedVectorRep(const KeyComparator& compare, Allocator* allocator,
@@ -141,31 +144,26 @@ class UnsortedVectorRep : public VectorRep {
     // Returns the key at the current position.
     // REQUIRES: Valid()
     const char* key() const override;
-
-    // Advances to the next position.
-    // REQUIRES: Valid()
+    
+    // [MODIFIED] Changed from  increment to logical search
     void Next() override;
-
-    // Advances to the previous position.
-    // REQUIRES: Valid()
+    
+    // [MODIFIED] Changed from decrement to logical search
     void Prev() override;
-
-    // Advance to the first entry with a key >= target
+    
+    // [MODIFIED] Changed from finding first *physical* match to finding *logical* lower bound
     void Seek(const Slice& user_key, const char* memtable_key) override;
-
-    // Advance to the first entry with a key <= target
+    
+    // [ADDED] changed from asserted false to implement SeekForPrev 
     void SeekForPrev(const Slice& user_key, const char* memtable_key) override;
-
-    // Position at the first entry in collection.
-    // Final state of iterator is Valid() iff collection is not empty.
+    
+    // [MODIFIED] Changed to search for logical minimum
     void SeekToFirst() override;
-
-    // Position at the last entry in collection.
-    // Final state of iterator is Valid() iff collection is not empty.
+    
+    // [MODIFIED] Changed to search for logical maximum
     void SeekToLast() override;
   };
 };
-
 
 void VectorRep::Insert(KeyHandle handle) {
 #ifdef TIMER
@@ -297,16 +295,16 @@ void VectorRep::Iterator::Prev() {
 // Advance to the first entry with a key >= target
 void VectorRep::Iterator::Seek(const Slice& user_key,
                                const char* memtable_key) {
-#ifdef GET_TIMER
-      auto start = std::chrono::high_resolution_clock::now();
-#endif // GET_TIMER                                
+// #ifdef GET_TIMER
+//       auto start = std::chrono::high_resolution_clock::now();
+// #endif // GET_TIMER                                
   DoSort();
-#ifdef GET_TIMER
-      auto stop = std::chrono::high_resolution_clock::now();
-      auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
-      // std::cout << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__ << ": " << duration.count() << ", " << std::flush;
-      std::cout << "VectorRep::" << __FUNCTION__ << ": " << duration.count() << ", " << std::flush;
-#endif // GET_TIMER
+// #ifdef GET_TIMER
+//       auto stop = std::chrono::high_resolution_clock::now();
+//       auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+//       // std::cout << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__ << ": " << duration.count() << ", " << std::flush;
+//       std::cout << "VectorRep::" << __FUNCTION__ << ": " << duration.count() << ", " << std::flush;
+// #endif // GET_TIMER
   // Do binary search to find first value not less than the target
   const char* encoded_key =
       (memtable_key != nullptr) ? memtable_key : EncodeKey(&tmp_, user_key);
@@ -342,9 +340,13 @@ void VectorRep::Iterator::SeekToLast() {
 
 void VectorRep::Get(const LookupKey& k, void* callback_args,
                     bool (*callback_func)(void* arg, const char* entry)) {
+// #ifdef GET_TIMER
+//       auto start = std::chrono::high_resolution_clock::now();
+// #endif // GET_TIMER
 #ifdef GET_TIMER
-      auto start = std::chrono::high_resolution_clock::now();
-#endif // GET_TIMER
+  // 1. Start Copy Timer
+  auto start_copy = std::chrono::high_resolution_clock::now();
+#endif
   rwlock_.ReadLock();
   VectorRep* vector_rep;
   std::shared_ptr<Bucket> bucket;
@@ -357,14 +359,29 @@ void VectorRep::Get(const LookupKey& k, void* callback_args,
   VectorRep::Iterator iter(vector_rep, immutable_ ? bucket_ : bucket, compare_);
   rwlock_.ReadUnlock();
 
+  #ifdef GET_TIMER
+  // 2. "Sorted_Copy"
+  auto end_copy = std::chrono::high_resolution_clock::now();
+  auto copy_duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_copy - start_copy);
+  std::cout << "Sorted_Copy: " << copy_duration.count() << ", " << std::flush;
+
+  // 3. Start Timer
+  auto start_search = std::chrono::high_resolution_clock::now();
+#endif
   for (iter.Seek(k.user_key(), k.memtable_key().data());
        iter.Valid() && callback_func(callback_args, iter.key()); iter.Next()) {
   }
+// #ifdef GET_TIMER
+//       auto stop = std::chrono::high_resolution_clock::now();
+//       auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+//       std::cout << "VectorRep::" << __FUNCTION__ << ": " << duration.count() << ", " << std::flush;
+// #endif // GET_TIMER
 #ifdef GET_TIMER
-      auto stop = std::chrono::high_resolution_clock::now();
-      auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
-      std::cout << "VectorRep::" << __FUNCTION__ << ": " << duration.count() << ", " << std::flush;
-#endif // GET_TIMER
+  // 4. End Search Timer & Log "Sorted_Search"
+  auto end_search = std::chrono::high_resolution_clock::now();
+  auto search_duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_search - start_search);
+  std::cout << "Sorted_Search: " << search_duration.count() << ", " << std::flush;
+#endif
 }
 
 MemTableRep::Iterator* VectorRep::GetIterator(Arena* arena) {
@@ -392,6 +409,7 @@ MemTableRep::Iterator* VectorRep::GetIterator(Arena* arena) {
   }
 }
 
+//unsorted vector
 UnsortedVectorRep::Iterator::Iterator(
     class UnsortedVectorRep* vrep,
     std::shared_ptr<std::vector<const char*>> bucket,
@@ -409,68 +427,137 @@ bool UnsortedVectorRep::Iterator::Valid() const {
 
 const char* UnsortedVectorRep::Iterator::key() const { return *cit_; }
 
-// Advances to the next position.
-// REQUIRES: Valid()
+// [MODIFIED] Next()
+// Was: ++cit; moved to the next mem loc. wrong logic for unsorted buffer
+// changed to: Performs O(N) scan to find the smallest key strictly greater than current. this logic is correct
 void UnsortedVectorRep::Iterator::Next() {
+  if (cit_ == bucket_->end()) return;
+
+  const char* current_key = *cit_;
+  auto best_candidate = bucket_->end();
+
+  // Linear scan to find logical successor
+  for (auto it = bucket_->begin(); it != bucket_->end(); ++it) {
+    if (compare_(*it, current_key) > 0) {
+      if (best_candidate == bucket_->end() || compare_(*it, *best_candidate) < 0) {
+        best_candidate = it;
+      }
+    }
+  }
+  cit_ = best_candidate;
+}
+
+// [MODIFIED] Prev()
+// Was: --cit_; moved to the prev mem loc. wrong logic for unsorted buffer
+// changed to: Performs O(N) scan to find largest key strictly smaller than current.
+void UnsortedVectorRep::Iterator::Prev() {
   if (cit_ == bucket_->end()) {
+    SeekToLast(); 
     return;
   }
-  ++cit_;
-}
 
-// Advances to the previous position.
-// REQUIRES: Valid()
-void UnsortedVectorRep::Iterator::Prev() {
-  if (cit_ == bucket_->begin()) {
-    cit_ = bucket_->end();
-  } else {
-    --cit_;
+  const char* current_key = *cit_;
+  auto best_candidate = bucket_->end();
+
+  // Linear scan to find logical predecessor
+  for (auto it = bucket_->begin(); it != bucket_->end(); ++it) {
+    if (compare_(*it, current_key) < 0) {
+      if (best_candidate == bucket_->end() || compare_(*it, *best_candidate) > 0) {
+        best_candidate = it;
+      }
+    }
   }
+  cit_ = best_candidate;
 }
 
-// Advance to the first entry with a key >= target
+// [MODIFIED] Seek()
+// Was: std::find_if(...) (Stopped at first physical match >= target, only valid if buffer is sorted)
+// changedto: Performs O(N) scan to find the smallest lower bound 
 void UnsortedVectorRep::Iterator::Seek(const Slice& user_key,
                                        const char* memtable_key) {
-  // Do binary search to find first value not less than the target
   const char* encoded_key =
       (memtable_key != nullptr) ? memtable_key : EncodeKey(&tmp_, user_key);
-  cit_ = std::find_if(bucket_->begin(), bucket_->end(),
-                      [this, &encoded_key](const char* a) {
-                        bool ret = compare_(a, encoded_key) >= 0;
-                        return ret;
-                      });
-}
+  
+  auto best_candidate = bucket_->end();
 
-// Advance to the first entry with a key <= target
-void UnsortedVectorRep::Iterator::SeekForPrev(const Slice& /* user_key */,
-                                              const char* /* memtable_key */) {
-  assert(false);
-}
-
-// Position at the first entry in collection.
-// Final state of iterator is Valid() iff collection is not empty.
-void UnsortedVectorRep::Iterator::SeekToFirst() { cit_ = bucket_->begin(); }
-
-// Position at the last entry in collection.
-// Final state of iterator is Valid() iff collection is not empty.
-void UnsortedVectorRep::Iterator::SeekToLast() {
-  cit_ = bucket_->end();
-  if (bucket_->size() != 0) {
-    --cit_;
+  for (auto it = bucket_->begin(); it != bucket_->end(); ++it) {
+    // Check if item >= target
+    if (compare_(*it, encoded_key) >= 0) {
+      // Optimization: if exact match, we stop
+      if (compare_(*it, encoded_key) == 0) {
+         cit_ = it;
+         return; 
+      }
+      // Otherwise, track the smallest key that satisfies the condition
+      if (best_candidate == bucket_->end() || compare_(*it, *best_candidate) < 0) {
+        best_candidate = it;
+      }
+    }
   }
+  cit_ = best_candidate;
+}
+
+// [ADDED] SeekForPrev()
+// Was: assert(false);
+// changed to: Performs O(N) scan to find the largest key <= target.
+void UnsortedVectorRep::Iterator::SeekForPrev(const Slice& user_key,
+                                              const char* memtable_key) {
+  const char* encoded_key =
+      (memtable_key != nullptr) ? memtable_key : EncodeKey(&tmp_, user_key);
+      
+  auto best_candidate = bucket_->end();
+
+  for (auto it = bucket_->begin(); it != bucket_->end(); ++it) {
+    // Check if item <= target
+    if (compare_(*it, encoded_key) <= 0) {
+       // Track the largest key that satisfies the condition
+       if (best_candidate == bucket_->end() || compare_(*it, *best_candidate) > 0) {
+         best_candidate = it;
+       }
+    }
+  }
+  cit_ = best_candidate;
+}
+
+// [MODIFIED] SeekToFirst()
+// Was: cit_ = bucket_->begin(); 
+// chnaged to: Scans for logical min.
+void UnsortedVectorRep::Iterator::SeekToFirst() { 
+  auto best_candidate = bucket_->end();
+  for (auto it = bucket_->begin(); it != bucket_->end(); ++it) {
+    if (best_candidate == bucket_->end() || compare_(*it, *best_candidate) < 0) {
+      best_candidate = it;
+    }
+  }
+  cit_ = best_candidate;
+}
+
+// [MODIFIED] SeekToLast()
+// Was: cit_ = bucket_->end() - 1; 
+// Now: Scans for logical max.
+void UnsortedVectorRep::Iterator::SeekToLast() {
+  auto best_candidate = bucket_->end();
+  for (auto it = bucket_->begin(); it != bucket_->end(); ++it) {
+    if (best_candidate == bucket_->end() || compare_(*it, *best_candidate) > 0) {
+      best_candidate = it;
+    }
+  }
+  cit_ = best_candidate;
 }
 
 void UnsortedVectorRep::Get(const LookupKey& k, void* callback_args,
                             bool (*callback_func)(void* arg,
                                                   const char* entry)) {
+#ifdef GET_TIMER
+  auto start_copy = std::chrono::high_resolution_clock::now();
+#endif
   rwlock_.ReadLock();
   UnsortedVectorRep* vector_rep;
   std::shared_ptr<Bucket> bucket;
+  
+  // [MODIFIED] Removed sorting logic .
+  // We strictly just copy the bucket, regardless of immutability.
   if (immutable_) {
-    if (!sorted_) {
-      std::sort(bucket_->begin(), bucket_->end(),
-                stl_wrappers::Compare(compare_));
-    }
     vector_rep = this;
   } else {
     vector_rep = nullptr;
@@ -480,10 +567,26 @@ void UnsortedVectorRep::Get(const LookupKey& k, void* callback_args,
   UnsortedVectorRep::Iterator iter(vector_rep, immutable_ ? bucket_ : bucket,
                                    compare_);
   rwlock_.ReadUnlock();
+  #ifdef GET_TIMER
+  auto end_copy = std::chrono::high_resolution_clock::now();
+  auto copy_duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_copy - start_copy);
+  std::cout << "Unsorted_Copy: " << copy_duration.count() << ", " << std::flush;
+#endif
 
+#ifdef GET_TIMER
+  auto start_search = std::chrono::high_resolution_clock::now();
+#endif
+
+  // [NOTE] updated logic to perform a valid point lookup without sorting using new seek logic.
   for (iter.Seek(k.user_key(), k.memtable_key().data());
        iter.Valid() && callback_func(callback_args, iter.key()); iter.Next()) {
   }
+  
+  #ifdef GET_TIMER
+  auto end_search = std::chrono::high_resolution_clock::now();
+  auto search_duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_search - start_search);
+  std::cout << "Unsorted_Search: " << search_duration.count() << ", " << std::flush;
+#endif
 }
 
 class AlwaysSortedVectorRep : public VectorRep {
@@ -518,6 +621,9 @@ public:
   };
 
   void Get(const LookupKey &k, void *callback_args, bool (*callback_func)(void *arg, const char *entry)) override {
+#ifdef GET_TIMER
+    auto start_copy = std::chrono::high_resolution_clock::now();
+#endif
     rwlock_.ReadLock();
     const auto vector_rep = this;
     const auto bucket = std::make_shared<Bucket>(*bucket_);
@@ -525,13 +631,25 @@ public:
     AlwaysSortedVectorRep::Iterator iter(vector_rep, bucket,
                                          compare_);
     rwlock_.ReadUnlock();
-
+      #ifdef GET_TIMER
+    auto end_copy = std::chrono::high_resolution_clock::now();
+    auto copy_duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_copy - start_copy);
+    std::cout << "Sorted_Copy: " << copy_duration.count() << ", " << std::flush;
+#endif
+#ifdef GET_TIMER
+    auto start_search = std::chrono::high_resolution_clock::now();
+#endif
     for (
       iter.Seek(k.user_key(), k.memtable_key().data());
       iter.Valid() && callback_func(callback_args, iter.key());
       iter.Next()
     ) {
     }
+    #ifdef GET_TIMER
+    auto end_search = std::chrono::high_resolution_clock::now();
+    auto search_duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_search - start_search);
+    std::cout << "Sorted_Search: " << search_duration.count() << ", " << std::flush;
+#endif
   }
 
   class Iterator : public MemTableRep::Iterator {
