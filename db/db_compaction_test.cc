@@ -19,6 +19,7 @@
 #include "rocksdb/advanced_options.h"
 #include "rocksdb/concurrent_task_limiter.h"
 #include "rocksdb/experimental.h"
+#include "rocksdb/iostats_context.h"
 #include "rocksdb/sst_file_writer.h"
 #include "test_util/mock_time_env.h"
 #include "test_util/sync_point.h"
@@ -7128,6 +7129,70 @@ TEST_F(DBCompactionTest, PartialManualCompaction) {
   ASSERT_OK(dbfull()->CompactRange(cro, nullptr, nullptr));
 }
 
+TEST_F(DBCompactionTest, ConcurrentFIFOPickingSameFileBug) {
+  Options opts = CurrentOptions();
+  opts.compaction_style = CompactionStyle::kCompactionStyleLevel;
+  opts.num_levels = 3;
+  opts.disable_auto_compactions = true;
+  opts.max_background_jobs = 3;
+
+  DestroyAndReopen(opts);
+
+  ASSERT_OK(Put("k1", "v1"));
+  ASSERT_OK(Flush());
+
+  // Create a non-L0 SST file for multi-level FIFO size-based compaction later
+  MoveFilesToLevel(2);
+
+  Options opts_new(opts);
+  opts_new.compaction_style = CompactionStyle::kCompactionStyleFIFO;
+  opts_new.max_open_files = -1;
+  // Set a low threshold to trigger multi-level size-based compaction
+  opts_new.compaction_options_fifo.max_table_files_size = 1;
+
+  Reopen(opts_new);
+
+  const CompactRangeOptions cro;
+  const Slice begin_key("k1");
+  const Slice end_key("k2");
+
+  std::unique_ptr<port::Thread> concurrent_compaction;
+
+  bool within_first_compaction = true;
+  SyncPoint::GetInstance()->SetCallBack(
+      "VersionSet::LogAndApply:WriteManifestStart", [&](void* /*arg*/) {
+        if (!within_first_compaction) {
+          return;
+        }
+        within_first_compaction = false;
+
+        // To allow the second/concurrent compaction to still see the non-L0
+        // SST file and coerce the bug of picking that file
+        SyncPoint::GetInstance()->LoadDependency({
+            {"DBImpl::BackgroundCompaction:BeforeCompaction",
+             "VersionSet::LogAndApply:WriteManifest"},
+        });
+
+        concurrent_compaction.reset(new port::Thread([&]() {
+          // Before the fix, the second CompactRange() will either fail the
+          // assertion of double file picking `being_compacted !=
+          // inputs_[i][j]->being_compacted` in debug mode or cause LSM shape
+          // corruption "Cannot delete table file XXX from level 2 since it is
+          // not in the LSM tree" in release mode
+          Status s = db_->CompactRange(cro, &begin_key, &end_key);
+          ASSERT_OK(s);
+        }));
+      });
+
+  SyncPoint::GetInstance()->EnableProcessing();
+  Status s = db_->CompactRange(cro, &begin_key, &end_key);
+  SyncPoint::GetInstance()->DisableProcessing();
+
+  ASSERT_OK(s);
+
+  concurrent_compaction->join();
+}
+
 TEST_F(DBCompactionTest, ManualCompactionFailsInReadOnlyMode) {
   // Regression test for bug where manual compaction hangs forever when the DB
   // is in read-only mode. Verify it now at least returns, despite failing.
@@ -9727,6 +9792,7 @@ TEST_F(DBCompactionTest, FIFOChangeTemperature) {
       int total_cold = 0;
       int total_warm = 0;
       int total_hot = 0;
+      int total_ice = 0;
       int total_unknown = 0;
       ROCKSDB_NAMESPACE::SyncPoint::GetInstance()->SetCallBack(
           "NewWritableFile::FileOptions.temperature", [&](void* arg) {
@@ -9737,6 +9803,8 @@ TEST_F(DBCompactionTest, FIFOChangeTemperature) {
               total_warm++;
             } else if (temperature == Temperature::kHot) {
               total_hot++;
+            } else if (temperature == Temperature::kIce) {
+              total_ice++;
             } else {
               assert(temperature == Temperature::kUnknown);
               total_unknown++;
@@ -9808,6 +9876,261 @@ TEST_F(DBCompactionTest, FIFOChangeTemperature) {
       Destroy(options);
     }
   }
+}
+
+using TemperatureSet = SmallEnumSet<Temperature, Temperature::kLastTemperature>;
+static void VerifyTemperatureFileReadStats(const Statistics& st,
+                                           TemperatureSet temps) {
+  SCOPED_TRACE("Temp set size = " + std::to_string(temps.count()));
+  constexpr uint64_t min_bytes = 100;
+  constexpr uint64_t min_count = 1;
+
+  IOStatsContext* iostats = get_iostats_context();
+  if (temps.Contains(Temperature::kHot)) {
+    EXPECT_GE(st.getTickerCount(HOT_FILE_READ_BYTES), min_bytes);
+    EXPECT_GE(st.getTickerCount(HOT_FILE_READ_COUNT), min_count);
+    EXPECT_GE(iostats->file_io_stats_by_temperature.hot_file_bytes_read,
+              min_bytes);
+    EXPECT_GE(iostats->file_io_stats_by_temperature.hot_file_read_count,
+              min_count);
+
+  } else {
+    EXPECT_EQ(st.getTickerCount(HOT_FILE_READ_BYTES), 0);
+    EXPECT_EQ(st.getTickerCount(HOT_FILE_READ_COUNT), 0);
+    EXPECT_EQ(iostats->file_io_stats_by_temperature.hot_file_bytes_read, 0);
+    EXPECT_EQ(iostats->file_io_stats_by_temperature.hot_file_read_count, 0);
+  }
+
+  if (temps.Contains(Temperature::kWarm)) {
+    EXPECT_GE(st.getTickerCount(WARM_FILE_READ_BYTES), min_bytes);
+    EXPECT_GE(st.getTickerCount(WARM_FILE_READ_COUNT), min_count);
+    EXPECT_GE(iostats->file_io_stats_by_temperature.warm_file_bytes_read,
+              min_bytes);
+    EXPECT_GE(iostats->file_io_stats_by_temperature.warm_file_read_count,
+              min_count);
+  } else {
+    EXPECT_EQ(st.getTickerCount(WARM_FILE_READ_BYTES), 0);
+    EXPECT_EQ(st.getTickerCount(WARM_FILE_READ_COUNT), 0);
+    EXPECT_EQ(iostats->file_io_stats_by_temperature.warm_file_bytes_read, 0);
+    EXPECT_EQ(iostats->file_io_stats_by_temperature.warm_file_read_count, 0);
+  }
+
+  if (temps.Contains(Temperature::kCool)) {
+    EXPECT_GE(st.getTickerCount(COOL_FILE_READ_BYTES), min_bytes);
+    EXPECT_GE(st.getTickerCount(COOL_FILE_READ_COUNT), min_count);
+    EXPECT_GE(iostats->file_io_stats_by_temperature.cool_file_bytes_read,
+              min_bytes);
+    EXPECT_GE(iostats->file_io_stats_by_temperature.cool_file_read_count,
+              min_count);
+  } else {
+    EXPECT_EQ(st.getTickerCount(COOL_FILE_READ_BYTES), 0);
+    EXPECT_EQ(st.getTickerCount(COOL_FILE_READ_COUNT), 0);
+    EXPECT_EQ(iostats->file_io_stats_by_temperature.cool_file_bytes_read, 0);
+    EXPECT_EQ(iostats->file_io_stats_by_temperature.cool_file_read_count, 0);
+  }
+
+  if (temps.Contains(Temperature::kCold)) {
+    EXPECT_GE(st.getTickerCount(COLD_FILE_READ_BYTES), min_bytes);
+    EXPECT_GE(st.getTickerCount(COLD_FILE_READ_COUNT), min_count);
+    EXPECT_GE(iostats->file_io_stats_by_temperature.cold_file_bytes_read,
+              min_bytes);
+    EXPECT_GE(iostats->file_io_stats_by_temperature.cold_file_read_count,
+              min_count);
+  } else {
+    EXPECT_EQ(st.getTickerCount(COLD_FILE_READ_BYTES), 0);
+    EXPECT_EQ(st.getTickerCount(COLD_FILE_READ_COUNT), 0);
+    EXPECT_EQ(iostats->file_io_stats_by_temperature.cold_file_bytes_read, 0);
+    EXPECT_EQ(iostats->file_io_stats_by_temperature.cold_file_read_count, 0);
+  }
+
+  if (temps.Contains(Temperature::kIce)) {
+    EXPECT_GE(st.getTickerCount(ICE_FILE_READ_BYTES), min_bytes);
+    EXPECT_GE(st.getTickerCount(ICE_FILE_READ_COUNT), min_count);
+    EXPECT_GE(iostats->file_io_stats_by_temperature.ice_file_bytes_read,
+              min_bytes);
+    EXPECT_GE(iostats->file_io_stats_by_temperature.ice_file_read_count,
+              min_count);
+  } else {
+    EXPECT_EQ(st.getTickerCount(ICE_FILE_READ_BYTES), 0);
+    EXPECT_EQ(st.getTickerCount(ICE_FILE_READ_COUNT), 0);
+    EXPECT_EQ(iostats->file_io_stats_by_temperature.ice_file_bytes_read, 0);
+    EXPECT_EQ(iostats->file_io_stats_by_temperature.ice_file_read_count, 0);
+  }
+}
+
+TEST_F(DBCompactionTest, FIFOMultiTierTemperatureAging) {
+  // Test multi-tier aging: Hot -> Warm -> Cool -> Cold -> Ice
+  Options options = CurrentOptions();
+  options.compaction_style = kCompactionStyleFIFO;
+  options.num_levels = 1;
+  options.max_open_files = -1;
+  options.level0_file_num_compaction_trigger = 2;
+  options.create_if_missing = true;
+  options.statistics = CreateDBStatistics();
+  BlockBasedTableOptions bbto;
+  bbto.no_block_cache = true;  // Simplify statistics
+  options.table_factory.reset(NewBlockBasedTableFactory(bbto));
+
+  CompactionOptionsFIFO fifo_options;
+  // Multi-tier aging: files age through multiple temperatures
+  fifo_options.file_temperature_age_thresholds = {
+      {Temperature::kWarm, 500},   // Hot -> Warm after 500s
+      {Temperature::kCool, 1000},  // Warm -> Cool
+      {Temperature::kCold, 1500},  // Cool -> Cold
+      {Temperature::kIce, 2000}    // Cold -> Ice
+  };
+  fifo_options.max_table_files_size = 100000000;
+  fifo_options.allow_trivial_copy_when_change_temperature = true;
+  options.compaction_options_fifo = fifo_options;
+  options.default_write_temperature = Temperature::kHot;
+
+  Reopen(options);
+  env_->SetMockSleep();
+
+  // Track all temperature file creations
+  int total_hot = 0, total_warm = 0, total_cool = 0, total_cold = 0,
+      total_ice = 0, total_unknown = 0;
+  ROCKSDB_NAMESPACE::SyncPoint::GetInstance()->SetCallBack(
+      "NewWritableFile::FileOptions.temperature", [&](void* arg) {
+        Temperature temperature = *(static_cast<Temperature*>(arg));
+        switch (temperature) {
+          case Temperature::kHot:
+            total_hot++;
+            break;
+          case Temperature::kWarm:
+            total_warm++;
+            break;
+          case Temperature::kCool:
+            total_cool++;
+            break;
+          case Temperature::kCold:
+            total_cold++;
+            break;
+          case Temperature::kIce:
+            total_ice++;
+            break;
+          case Temperature::kUnknown:
+            total_unknown++;
+            break;
+          default:
+            break;
+        }
+      });
+  ROCKSDB_NAMESPACE::SyncPoint::GetInstance()->EnableProcessing();
+
+  // Create initial three files (will start as Hot), enough to ensure key
+  // range filtering will be applied in FilePicker::GetNextFile() with one
+  // more file
+  for (int i = 0; i < 3; ++i) {
+    ASSERT_OK(Put(Key(0), Random::GetTLSInstance()->RandomBinaryString(100)));
+    ASSERT_OK(Flush());
+  }
+
+  // Test reading from Hot temperature file
+  ASSERT_OK(options.statistics->Reset());
+  get_iostats_context()->Reset();
+
+  ASSERT_EQ(100U, Get(Key(0)).size());
+
+  VerifyTemperatureFileReadStats(*options.statistics, Temperature::kHot);
+
+  // Land well into each time interval
+  env_->MockSleepForSeconds(100);
+
+  // Age initial files to warm
+  env_->MockSleepForSeconds(500);
+  ASSERT_OK(Put(Key(1), Random::GetTLSInstance()->RandomBinaryString(101)));
+  ASSERT_OK(Flush());
+  ASSERT_OK(dbfull()->TEST_WaitForCompact());
+
+  // Test reading from Warm temperature file (the aged file)
+  ASSERT_OK(options.statistics->Reset());
+  get_iostats_context()->Reset();
+
+  ASSERT_EQ(100U, Get(Key(0)).size());
+
+  // Verify Warm file statistics
+  VerifyTemperatureFileReadStats(*options.statistics, Temperature::kWarm);
+
+  // Age initial files to cool
+  env_->MockSleepForSeconds(500);
+  ASSERT_OK(Put(Key(2), Random::GetTLSInstance()->RandomBinaryString(102)));
+  ASSERT_OK(Flush());
+  ASSERT_OK(dbfull()->TEST_WaitForCompact());
+
+  // Test reading from Cool temperature file (the aged file)
+  ASSERT_OK(options.statistics->Reset());
+  get_iostats_context()->Reset();
+
+  ASSERT_EQ(100U, Get(Key(0)).size());
+
+  VerifyTemperatureFileReadStats(*options.statistics, Temperature::kCool);
+
+  // Age initial files to cold
+  env_->MockSleepForSeconds(500);
+  ASSERT_OK(Put(Key(3), Random::GetTLSInstance()->RandomBinaryString(103)));
+  ASSERT_OK(Flush());
+  ASSERT_OK(dbfull()->TEST_WaitForCompact());
+
+  // Test reading from Cold temperature file (the aged file)
+  ASSERT_OK(options.statistics->Reset());
+  get_iostats_context()->Reset();
+
+  ASSERT_EQ(100U, Get(Key(0)).size());
+
+  VerifyTemperatureFileReadStats(*options.statistics, Temperature::kCold);
+
+  // Age initial files to ice
+  env_->MockSleepForSeconds(500);
+  ASSERT_OK(Put(Key(4), Random::GetTLSInstance()->RandomBinaryString(104)));
+  ASSERT_OK(Flush());
+  ASSERT_OK(dbfull()->TEST_WaitForCompact());
+
+  // Test reading from Ice temperature file (the aged file)
+  ASSERT_OK(options.statistics->Reset());
+  get_iostats_context()->Reset();
+
+  ASSERT_EQ(100U, Get(Key(0)).size());
+
+  VerifyTemperatureFileReadStats(*options.statistics, Temperature::kIce);
+
+  // Verify temperature progression in metadata
+  ColumnFamilyMetaData metadata;
+  db_->GetColumnFamilyMetaData(&metadata);
+
+  // Should have files at different temperatures
+  std::map<Temperature, int> temp_counts;
+  for (const auto& file : metadata.levels[0].files) {
+    temp_counts[file.temperature]++;
+  }
+
+  // Verify current files temperatures
+  EXPECT_EQ(temp_counts[Temperature::kHot], 1);
+  EXPECT_EQ(temp_counts[Temperature::kWarm], 1);
+  EXPECT_EQ(temp_counts[Temperature::kCool], 1);
+  EXPECT_EQ(temp_counts[Temperature::kCold], 1);
+  EXPECT_EQ(temp_counts[Temperature::kIce], 3);
+
+  // Verify historical (and current) file temperatures
+  EXPECT_EQ(total_hot, 7);
+  EXPECT_EQ(total_warm, 6);
+  EXPECT_EQ(total_cool, 5);
+  EXPECT_EQ(total_cold, 4);
+  EXPECT_EQ(total_ice, 3);
+
+  // Final comprehensive test: read from all temperature files
+  Reopen(options);
+  ASSERT_OK(options.statistics->Reset());
+  get_iostats_context()->Reset();
+
+  // Read from all files to verify cumulative statistics
+  for (int i = 0; i < 5; i++) {
+    ASSERT_EQ(static_cast<unsigned>(100 + i), Get(Key(i)).size());
+  }
+
+  VerifyTemperatureFileReadStats(*options.statistics, TemperatureSet::All());
+
+  ROCKSDB_NAMESPACE::SyncPoint::GetInstance()->DisableProcessing();
 }
 
 TEST_F(DBCompactionTest, DisableMultiManualCompaction) {
@@ -11216,6 +11539,71 @@ TEST_F(DBCompactionTest, RecordNewestKeyTimeForTtlCompaction) {
   ASSERT_OK(dbfull()->CompactRange(CompactRangeOptions(), nullptr, nullptr));
   ASSERT_OK(dbfull()->TEST_WaitForCompact());
   ASSERT_EQ(NumTableFilesAtLevel(0), 0);
+}
+
+// Test verifies compaction file cutting logic when using tail size estimation
+// maintains output files at or below the target file size.
+TEST_F(DBCompactionTest, CompactionRespectsTargetSizeWithTailEstimation) {
+  const int kInitialKeyCount = 10000;  // 10k keys
+  const int kValueSize = 100;          // 100 bytes per key
+  const int kSeed = 301;
+
+  Options options = CurrentOptions();
+  options.target_file_size_is_upper_bound = true;
+  options.target_file_size_base = 256 * 1024;
+  options.write_buffer_size = 2 * 1024 * 1024;
+  options.level0_file_num_compaction_trigger = 100;  // Never trigger L0->L1
+  options.compression = kNoCompression;
+
+  BlockBasedTableOptions table_options;
+  table_options.partition_filters = true;
+  table_options.metadata_block_size = 4 * 1024;
+  table_options.index_type = BlockBasedTableOptions::kBinarySearch;
+  table_options.filter_policy.reset(NewBloomFilterPolicy(10));
+  options.table_factory.reset(NewBlockBasedTableFactory(table_options));
+
+  DestroyAndReopen(options);
+
+  // Generate 2 L0 files
+  // Generate first file with 10k keys (each ~100 bytes) approx 1.2MB total
+  Random rnd(kSeed);
+  for (int i = 0; i < kInitialKeyCount; i++) {
+    ASSERT_OK(Put(Key(i), rnd.RandomString(kValueSize)));
+  }
+  ASSERT_OK(Flush());
+
+  // Generate second file with overlapping keys to force compaction (prevent
+  // trivial move)
+  for (int i = kInitialKeyCount / 2; i < kInitialKeyCount * 1.5; i++) {
+    ASSERT_OK(Put(Key(i), rnd.RandomString(kValueSize)));
+  }
+  ASSERT_OK(Flush());
+
+  // Capture file metadata and assert two L0 files
+  std::vector<LiveFileMetaData> file_metadata;
+  db_->GetLiveFilesMetaData(&file_metadata);
+  ASSERT_EQ(file_metadata.size(), 2);
+  for (const auto& file : file_metadata) {
+    ASSERT_EQ(file.level, 0);
+  };
+
+  // Manually compact LO files to L1
+  CompactRangeOptions cro;
+  cro.change_level = true;
+  cro.target_level = 1;
+  ASSERT_OK(db_->CompactRange(cro, nullptr, nullptr));
+
+  ASSERT_OK(dbfull()->TEST_WaitForCompact());
+
+  // Verify that compacted output files are under target file size
+  for (const auto& file : file_metadata) {
+    if (file.level > 0) {
+      EXPECT_LE(file.size, options.target_file_size_base)
+          << "Output file size exceeds target size: " << " File: " << file.name
+          << " level: " << file.level << " File size: " << file.size
+          << " Target size: " << options.target_file_size_base;
+    }
+  }
 }
 
 class PeriodicCompactionListener : public EventListener {

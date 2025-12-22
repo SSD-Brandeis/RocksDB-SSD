@@ -4094,11 +4094,23 @@ TEST_P(IngestDBGeneratedFileTest2, NonZeroSeqno) {
   ingest_opts.fail_if_not_bottommost_level = std::get<3>(GetParam());
   ingest_opts.link_files = std::get<4>(GetParam());
   Random* rnd = Random::GetTLSInstance();
+  rnd->Reset(std::random_device{}());
+  std::ostringstream ingest_opts_trace;
+  ingest_opts_trace << "ingest_opts params: " << "snapshot_consistency="
+                    << ingest_opts.snapshot_consistency << ", "
+                    << "allow_global_seqno=" << ingest_opts.allow_global_seqno
+                    << ", " << "allow_blocking_flush="
+                    << ingest_opts.allow_blocking_flush << ", "
+                    << "fail_if_not_bottommost_level="
+                    << ingest_opts.fail_if_not_bottommost_level << ", "
+                    << "link_files=" << ingest_opts.link_files;
+  SCOPED_TRACE(ingest_opts_trace.str());
 
   do {
     SCOPED_TRACE("option_config_ = " + std::to_string(option_config_));
 
     Options options = CurrentOptions();
+    options.statistics = CreateDBStatistics();
     options.allow_concurrent_memtable_write =
         false;  // Required for VectorRepFactory
     CreateAndReopenWithCF({"non_overlap", "overlap"}, options);
@@ -4135,7 +4147,7 @@ TEST_P(IngestDBGeneratedFileTest2, NonZeroSeqno) {
     // optional L5: files in key range [70, 98]
     // L6: files in key range [1, 79]
     temp_cf_opts.target_file_size_base =
-        4 << 10;  // Small files to create multiple SSTs
+        20 << 10;  // Small files to create multiple SSTs
     temp_cf_opts.num_levels = 7;
     temp_cf_opts.disable_auto_compactions = true;  // Manually set up LSM
     temp_cf_opts.env = options.env;
@@ -4155,7 +4167,7 @@ TEST_P(IngestDBGeneratedFileTest2, NonZeroSeqno) {
     const Snapshot* snapshot = from_db->GetSnapshot();
 
     for (int k = 1; k < 99; ++k) {
-      expected_values[k] = rnd->RandomString(500);
+      expected_values[k] = rnd->RandomString(2000);
       ASSERT_OK(from_db->Put(wo, temp_cfh, Key(k), expected_values[k]));
     }
     ASSERT_OK(from_db->Flush({}, temp_cfh));
@@ -4233,8 +4245,20 @@ TEST_P(IngestDBGeneratedFileTest2, NonZeroSeqno) {
           "assigned a non-zero sequence number"));
       db_->ReleaseSnapshot(snapshot);
     }
+
+    std::atomic<int> file_scan_count{0};
+    SyncPoint::GetInstance()->SetCallBack(
+        "ExternalSstFileIngestionJob::GetSeqnoBoundaryForFile:FileScan",
+        [&](void* /*arg*/) { file_scan_count++; });
+    SyncPoint::GetInstance()->EnableProcessing();
+
     ASSERT_OK(
         db_->IngestExternalFile(non_overlap_cf, sst_file_paths, ingest_opts));
+
+    SyncPoint::GetInstance()->DisableProcessing();
+    SyncPoint::GetInstance()->ClearAllCallBacks();
+
+    EXPECT_EQ(file_scan_count, 0);
 
     // Validate ingested data.
     ReadOptions ro;
@@ -4250,11 +4274,17 @@ TEST_P(IngestDBGeneratedFileTest2, NonZeroSeqno) {
       s = db_->IngestExternalFile(overlap_cf, sst_file_paths, ingest_opts);
 
       ASSERT_NOK(s);
-      ASSERT_TRUE(s.ToString().find("An ingested file overlaps with existing "
-                                    "data in the DB and has been "
-                                    "assigned a non-zero sequence number") !=
-                  std::string::npos)
-          << s.ToString();
+      if (ingest_opts.fail_if_not_bottommost_level) {
+        ASSERT_TRUE(s.ToString().find("Files cannot be ingested to Lmax") !=
+                    std::string::npos)
+            << s.ToString();
+      } else {
+        ASSERT_TRUE(s.ToString().find("An ingested file overlaps with existing "
+                                      "data in the DB and has been "
+                                      "assigned a non-zero sequence number") !=
+                    std::string::npos)
+            << s.ToString();
+      }
     }
 
     // Cleanup

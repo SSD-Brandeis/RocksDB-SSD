@@ -71,9 +71,9 @@ DBTestBase::DBTestBase(const std::string path, bool env_do_fsync)
   if (getenv("MEM_ENV")) {
     mem_env_ = MockEnv::Create(base_env, base_env->GetSystemClock());
   }
-  if (getenv("ENCRYPTED_ENV")) {
+  if (auto ee = getenv("ENCRYPTED_ENV")) {
     std::shared_ptr<EncryptionProvider> provider;
-    std::string provider_id = getenv("ENCRYPTED_ENV");
+    std::string provider_id = ee;
     if (provider_id.find('=') == std::string::npos &&
         !EndsWith(provider_id, "://test")) {
       provider_id = provider_id + "://test";
@@ -454,7 +454,8 @@ Options DBTestBase::GetOptions(
       options.allow_mmap_reads = can_allow_mmap;
       break;
     case kManifestFileSize:
-      options.max_manifest_file_size = 50;  // 50 bytes
+      options.max_manifest_file_size = 50;     // 50 bytes
+      options.max_manifest_space_amp_pct = 0;  // old behavior
       break;
     case kPerfOptions:
       options.delayed_write_rate = 8 * 1024 * 1024;
@@ -1871,5 +1872,14 @@ template class TargetCacheChargeTrackingCache<
 template class TargetCacheChargeTrackingCache<
     CacheEntryRole::kBlockBasedTableReader>;
 template class TargetCacheChargeTrackingCache<CacheEntryRole::kFileMetadata>;
+
+const std::vector<Temperature> kKnownTemperatures = {
+    Temperature::kHot, Temperature::kWarm, Temperature::kCool,
+    Temperature::kCold, Temperature::kIce};
+
+Temperature RandomKnownTemperature() {
+  return kKnownTemperatures[Random::GetTLSInstance()->Uniform(
+      static_cast<int>(kKnownTemperatures.size()))];
+}
 
 }  // namespace ROCKSDB_NAMESPACE

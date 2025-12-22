@@ -99,13 +99,15 @@ void BuildDBOptions(const ImmutableDBOptions& immutable_db_options,
   options.log_file_time_to_roll = immutable_db_options.log_file_time_to_roll;
   options.keep_log_file_num = immutable_db_options.keep_log_file_num;
   options.recycle_log_file_num = immutable_db_options.recycle_log_file_num;
-  options.max_manifest_file_size = immutable_db_options.max_manifest_file_size;
+  options.max_manifest_file_size = mutable_db_options.max_manifest_file_size;
+  options.max_manifest_space_amp_pct =
+      mutable_db_options.max_manifest_space_amp_pct;
   options.table_cache_numshardbits =
       immutable_db_options.table_cache_numshardbits;
   options.WAL_ttl_seconds = immutable_db_options.WAL_ttl_seconds;
   options.WAL_size_limit_MB = immutable_db_options.WAL_size_limit_MB;
   options.manifest_preallocation_size =
-      immutable_db_options.manifest_preallocation_size;
+      mutable_db_options.manifest_preallocation_size;
   options.allow_mmap_reads = immutable_db_options.allow_mmap_reads;
   options.allow_mmap_writes = immutable_db_options.allow_mmap_writes;
   options.use_direct_reads = immutable_db_options.use_direct_reads;
@@ -232,6 +234,8 @@ void UpdateColumnFamilyOptions(const MutableCFOptions& moptions,
   cf_opts->block_protection_bytes_per_key =
       moptions.block_protection_bytes_per_key;
   cf_opts->paranoid_memory_checks = moptions.paranoid_memory_checks;
+  cf_opts->memtable_veirfy_per_key_checksum_on_seek =
+      moptions.memtable_veirfy_per_key_checksum_on_seek;
   cf_opts->bottommost_file_compaction_delay =
       moptions.bottommost_file_compaction_delay;
 
@@ -250,6 +254,8 @@ void UpdateColumnFamilyOptions(const MutableCFOptions& moptions,
   cf_opts->max_compaction_bytes = moptions.max_compaction_bytes;
   cf_opts->target_file_size_base = moptions.target_file_size_base;
   cf_opts->target_file_size_multiplier = moptions.target_file_size_multiplier;
+  cf_opts->target_file_size_is_upper_bound =
+      moptions.target_file_size_is_upper_bound;
   cf_opts->max_bytes_for_level_base = moptions.max_bytes_for_level_base;
   cf_opts->max_bytes_for_level_multiplier =
       moptions.max_bytes_for_level_multiplier;
@@ -267,6 +273,8 @@ void UpdateColumnFamilyOptions(const MutableCFOptions& moptions,
 
   cf_opts->compaction_options_fifo = moptions.compaction_options_fifo;
   cf_opts->compaction_options_universal = moptions.compaction_options_universal;
+
+  cf_opts->verify_output_flags = moptions.verify_output_flags;
 
   // Blob file related options
   cf_opts->enable_blob_files = moptions.enable_blob_files;
@@ -365,10 +373,9 @@ std::map<CompactionStopStyle, std::string>
         {kCompactionStopStyleTotalSize, "kCompactionStopStyleTotalSize"}};
 
 std::map<Temperature, std::string> OptionsHelper::temperature_to_string = {
-    {Temperature::kUnknown, "kUnknown"},
-    {Temperature::kHot, "kHot"},
-    {Temperature::kWarm, "kWarm"},
-    {Temperature::kCold, "kCold"}};
+    {Temperature::kUnknown, "kUnknown"}, {Temperature::kHot, "kHot"},
+    {Temperature::kWarm, "kWarm"},       {Temperature::kCool, "kCool"},
+    {Temperature::kCold, "kCold"},       {Temperature::kIce, "kIce"}};
 
 std::unordered_map<std::string, ChecksumType>
     OptionsHelper::checksum_type_string_map = {{"kNoChecksum", kNoChecksum},
@@ -963,10 +970,9 @@ std::unordered_map<std::string, CompactionStopStyle>
 
 std::unordered_map<std::string, Temperature>
     OptionsHelper::temperature_string_map = {
-        {"kUnknown", Temperature::kUnknown},
-        {"kHot", Temperature::kHot},
-        {"kWarm", Temperature::kWarm},
-        {"kCold", Temperature::kCold}};
+        {"kUnknown", Temperature::kUnknown}, {"kHot", Temperature::kHot},
+        {"kWarm", Temperature::kWarm},       {"kCool", Temperature::kCool},
+        {"kCold", Temperature::kCold},       {"kIce", Temperature::kIce}};
 
 std::unordered_map<std::string, PrepopulateBlobCache>
     OptionsHelper::prepopulate_blob_cache_string_map = {

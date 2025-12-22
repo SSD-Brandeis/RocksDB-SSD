@@ -42,6 +42,9 @@ Status ExternalSstFileIngestionJob::Prepare(
     status =
         GetIngestedFileInfo(file_path, next_file_number++, &file_to_ingest, sv);
     if (!status.ok()) {
+      ROCKS_LOG_WARN(db_options_.info_log,
+                     "Failed to get ingested file info: %s: %s",
+                     file_path.c_str(), status.ToString().c_str());
       return status;
     }
 
@@ -160,26 +163,35 @@ Status ExternalSstFileIngestionJob::Prepare(
         // It is unsafe to assume application had sync the file and file
         // directory before ingest the file. For integrity of RocksDB we need
         // to sync the file.
-        TEST_SYNC_POINT("ExternalSstFileIngestionJob::BeforeSyncIngestedFile");
-        auto s = fs_->SyncFile(path_inside_db, env_options_, IOOptions(),
-                               db_options_.use_fsync, nullptr);
-        TEST_SYNC_POINT("ExternalSstFileIngestionJob::AfterSyncIngestedFile");
-        TEST_SYNC_POINT_CALLBACK(
-            "ExternalSstFileIngestionJob::CheckSyncReturnCode", &s);
-        if (!s.ok()) {
-          if (s.IsNotSupported()) {
-            // Some file systems (especially remote/distributed) don't support
-            // SyncFile API. Ignore the NotSupported error in that case.
-            ROCKS_LOG_WARN(db_options_.info_log,
-                           "After link the file, SyncFile API is not supported "
-                           "for file %s: %s",
-                           path_inside_db.c_str(), status.ToString().c_str());
-          } else {
-            // for other errors, propagate the error
-            status = s;
-            ROCKS_LOG_WARN(db_options_.info_log,
-                           "Failed to sync ingested file %s: %s",
-                           path_inside_db.c_str(), status.ToString().c_str());
+
+        // TODO(xingbo), We should in general be moving away from production
+        // uses of ReuseWritableFile (except explicitly for WAL recycling),
+        // ReopenWritableFile, and NewRandomRWFile. We should create a
+        // FileSystem::SyncFile/FsyncFile API that by default does the
+        // re-open+sync+close combo but can (a) be reused easily, and (b) be
+        // overridden to do that more cleanly, e.g. in EncryptedEnv.
+        // https://github.com/facebook/rocksdb/issues/13741
+        std::unique_ptr<FSWritableFile> file_to_sync;
+        Status s = fs_->ReopenWritableFile(path_inside_db, env_options_,
+                                           &file_to_sync, nullptr);
+        TEST_SYNC_POINT_CALLBACK("ExternalSstFileIngestionJob::Prepare:Reopen",
+                                 &s);
+        // Some file systems (especially remote/distributed) don't support
+        // reopening a file for writing and don't require reopening and
+        // syncing the file. Ignore the NotSupported error in that case.
+        if (!s.IsNotSupported()) {
+          status = s;
+          if (status.ok()) {
+            TEST_SYNC_POINT(
+                "ExternalSstFileIngestionJob::BeforeSyncIngestedFile");
+            status = SyncIngestedFile(file_to_sync.get());
+            TEST_SYNC_POINT(
+                "ExternalSstFileIngestionJob::AfterSyncIngestedFile");
+            if (!status.ok()) {
+              ROCKS_LOG_WARN(db_options_.info_log,
+                             "Failed to sync ingested file %s: %s",
+                             path_inside_db.c_str(), status.ToString().c_str());
+            }
           }
         }
       } else if (status.IsNotSupported() &&
@@ -189,6 +201,10 @@ Status ExternalSstFileIngestionJob::Prepare(
         ROCKS_LOG_INFO(db_options_.info_log,
                        "Tried to link file %s but it's not supported : %s",
                        path_outside_db.c_str(), status.ToString().c_str());
+      } else {
+        ROCKS_LOG_WARN(db_options_.info_log, "Failed to link file %s to %s: %s",
+                       path_outside_db.c_str(), path_inside_db.c_str(),
+                       status.ToString().c_str());
       }
     } else {
       f.copy_file = true;
@@ -213,6 +229,12 @@ Status ExternalSstFileIngestionJob::Prepare(
                         io_tracer_);
       // The destination of the copy will be ingested
       f.file_temperature = dst_temp;
+
+      if (!status.ok()) {
+        ROCKS_LOG_WARN(db_options_.info_log, "Failed to copy file %s to %s: %s",
+                       path_outside_db.c_str(), path_inside_db.c_str(),
+                       status.ToString().c_str());
+      }
     } else {
       // Note: we currently assume that linking files does not cross
       // temperatures, so no need to change f.file_temperature
@@ -438,6 +460,11 @@ Status ExternalSstFileIngestionJob::NeedsFlush(bool* flush_needed,
     }
     status = cfd_->RangesOverlapWithMemtables(
         ranges, super_version, db_options_.allow_data_in_errors, flush_needed);
+    if (!status.ok()) {
+      ROCKS_LOG_WARN(db_options_.info_log,
+                     "Failed to check ranges overlap with memtables: %s",
+                     status.ToString().c_str());
+    }
   }
   if (status.ok() && *flush_needed) {
     if (!ingestion_options_.allow_blocking_flush) {
@@ -472,6 +499,9 @@ Status ExternalSstFileIngestionJob::Run() {
   bool need_flush = false;
   status = NeedsFlush(&need_flush, super_version);
   if (!status.ok()) {
+    ROCKS_LOG_WARN(db_options_.info_log,
+                   "Failed to check if flush is needed: %s",
+                   status.ToString().c_str());
     return status;
   }
   if (need_flush) {
@@ -543,6 +573,9 @@ Status ExternalSstFileIngestionJob::Run() {
                                      &last_seqno, &batch_uppermost_level,
                                      prev_batch_uppermost_level);
     if (!status.ok()) {
+      ROCKS_LOG_WARN(db_options_.info_log,
+                     "Failed to assign levels for one batch: %s",
+                     status.ToString().c_str());
       return status;
     }
 
@@ -585,6 +618,8 @@ Status ExternalSstFileIngestionJob::AssignLevelsForOneBatch(
                                 &largest_parsed, false /* log_err_key */);
     }
     if (!status.ok()) {
+      ROCKS_LOG_WARN(db_options_.info_log, "Failed to parse internal key: %s",
+                     status.ToString().c_str());
       return status;
     }
 
@@ -607,6 +642,10 @@ Status ExternalSstFileIngestionJob::AssignLevelsForOneBatch(
 
     status = AssignGlobalSeqnoForIngestedFile(file, assigned_seqno);
     if (!status.ok()) {
+      ROCKS_LOG_WARN(
+          db_options_.info_log,
+          "Failed to assign global sequence number for ingested file: %s",
+          status.ToString().c_str());
       return status;
     }
     TEST_SYNC_POINT_CALLBACK("ExternalSstFileIngestionJob::Run",
@@ -619,6 +658,9 @@ Status ExternalSstFileIngestionJob::AssignLevelsForOneBatch(
 
     status = GenerateChecksumForIngestedFile(file);
     if (!status.ok()) {
+      ROCKS_LOG_WARN(db_options_.info_log,
+                     "Failed to generate checksum for ingested file: %s",
+                     status.ToString().c_str());
       return status;
     }
 
@@ -707,8 +749,7 @@ void ExternalSstFileIngestionJob::CreateEquivalentFileIngestingCompactions() {
                             cfd_->ioptions().compaction_style),
         LLONG_MAX /* max compaction bytes, not applicable */,
         0 /* output path ID, not applicable */, mutable_cf_options.compression,
-        mutable_cf_options.compression_opts,
-        mutable_cf_options.default_write_temperature,
+        mutable_cf_options.compression_opts, Temperature::kUnknown,
         0 /* max_subcompaction, not applicable */,
         {} /* grandparents, not applicable */,
         std::nullopt /* earliest_snapshot */, nullptr /* snapshot_checker */,
@@ -844,6 +885,10 @@ Status ExternalSstFileIngestionJob::ResetTableReader(
   Status status =
       fs_->NewRandomAccessFile(external_file, fo, &sst_file, nullptr);
   if (!status.ok()) {
+    ROCKS_LOG_WARN(
+        db_options_.info_log,
+        "Failed to create random access file for external file %s: %s",
+        external_file.c_str(), status.ToString().c_str());
     return status;
   }
   Temperature updated_temp = sst_file->GetTemperature();
@@ -966,6 +1011,10 @@ Status ExternalSstFileIngestionJob::SanityCheckTableProperties(
     // user_defined_timestamps_persisted flag for the file.
     file_to_ingest->user_defined_timestamps_persisted = false;
   } else if (!s.ok()) {
+    ROCKS_LOG_WARN(
+        db_options_.info_log,
+        "ValidateUserDefinedTimestampsOptions failed for external file %s: %s",
+        external_file.c_str(), s.ToString().c_str());
     return s;
   }
 
@@ -990,6 +1039,9 @@ Status ExternalSstFileIngestionJob::GetIngestedFileInfo(
   Status status = fs_->GetFileSize(external_file, IOOptions(),
                                    &file_to_ingest->file_size, nullptr);
   if (!status.ok()) {
+    ROCKS_LOG_WARN(db_options_.info_log,
+                   "Failed to get file size for external file %s: %s",
+                   external_file.c_str(), status.ToString().c_str());
     return status;
   }
 
@@ -1006,12 +1058,19 @@ Status ExternalSstFileIngestionJob::GetIngestedFileInfo(
                             /*user_defined_timestamps_persisted=*/true, sv,
                             file_to_ingest, &table_reader);
   if (!status.ok()) {
+    ROCKS_LOG_WARN(db_options_.info_log,
+                   "Failed to reset table reader for external file %s: %s",
+                   external_file.c_str(), status.ToString().c_str());
     return status;
   }
 
   status = SanityCheckTableProperties(external_file, new_file_number, sv,
                                       file_to_ingest, &table_reader);
   if (!status.ok()) {
+    ROCKS_LOG_WARN(
+        db_options_.info_log,
+        "Failed to sanity check table properties for external file %s: %s",
+        external_file.c_str(), status.ToString().c_str());
     return status;
   }
 
@@ -1025,6 +1084,10 @@ Status ExternalSstFileIngestionJob::GetIngestedFileInfo(
         table_reader.get(), sv, file_to_ingest, allow_data_in_errors);
 
     if (!seqno_status.ok()) {
+      ROCKS_LOG_WARN(
+          db_options_.info_log,
+          "Failed to get sequence number boundary for external file %s: %s",
+          external_file.c_str(), seqno_status.ToString().c_str());
       return seqno_status;
     }
     assert(file_to_ingest->smallest_seqno <= file_to_ingest->largest_seqno);
@@ -1052,6 +1115,9 @@ Status ExternalSstFileIngestionJob::GetIngestedFileInfo(
     status = table_reader->VerifyChecksum(
         ro, TableReaderCaller::kExternalSSTIngestion);
     if (!status.ok()) {
+      ROCKS_LOG_WARN(db_options_.info_log,
+                     "Failed to verify checksum for table reader: %s",
+                     status.ToString().c_str());
       return status;
     }
   }
@@ -1243,6 +1309,9 @@ Status ExternalSstFileIngestionJob::AssignLevelAndSeqnoForIngestedFile(
           ro, env_options_, file_to_ingest->start_ukey,
           file_to_ingest->limit_ukey, lvl, &overlap_with_level);
       if (!status.ok()) {
+        ROCKS_LOG_WARN(db_options_.info_log,
+                       "Failed to check overlap with level iterator: %s",
+                       status.ToString().c_str());
         return status;
       }
       if (overlap_with_level) {
@@ -1355,6 +1424,14 @@ Status ExternalSstFileIngestionJob::AssignGlobalSeqnoForIngestedFile(
       PutFixed64(&seqno_val, seqno);
       status = fsptr->Write(file_to_ingest->global_seqno_offset, seqno_val,
                             IOOptions(), nullptr);
+      if (!status.ok()) {
+        ROCKS_LOG_WARN(db_options_.info_log,
+                       "Failed to write global seqno to %s: %s",
+                       file_to_ingest->internal_file_path.c_str(),
+                       status.ToString().c_str());
+        return status;
+      }
+
       if (status.ok()) {
         TEST_SYNC_POINT("ExternalSstFileIngestionJob::BeforeSyncGlobalSeqno");
         status = SyncIngestedFile(fsptr.get());
@@ -1371,6 +1448,11 @@ Status ExternalSstFileIngestionJob::AssignGlobalSeqnoForIngestedFile(
         return status;
       }
     } else if (!status.IsNotSupported()) {
+      ROCKS_LOG_WARN(
+          db_options_.info_log,
+          "Failed to open ingested file %s for random read/write: %s",
+          file_to_ingest->internal_file_path.c_str(),
+          status.ToString().c_str());
       return status;
     }
   }
@@ -1403,6 +1485,9 @@ IOStatus ExternalSstFileIngestionJob::GenerateChecksumForIngestedFile(
       db_options_.allow_mmap_reads, io_tracer_, db_options_.rate_limiter.get(),
       ro, db_options_.stats, db_options_.clock);
   if (!io_s.ok()) {
+    ROCKS_LOG_WARN(
+        db_options_.info_log, "Failed to generate checksum for %s: %s",
+        file_to_ingest->internal_file_path.c_str(), io_s.ToString().c_str());
     return io_s;
   }
   file_to_ingest->file_checksum = std::move(file_checksum);
@@ -1445,21 +1530,26 @@ Status ExternalSstFileIngestionJob::SyncIngestedFile(TWritableFile* file) {
 Status ExternalSstFileIngestionJob::GetSeqnoBoundaryForFile(
     TableReader* table_reader, SuperVersion* sv,
     IngestedFileInfo* file_to_ingest, bool allow_data_in_errors) {
-  const bool has_largest_seqno =
-      table_reader->GetTableProperties()->HasKeyLargestSeqno();
-  SequenceNumber largest_seqno =
-      table_reader->GetTableProperties()->key_largest_seqno;
-  if (has_largest_seqno && largest_seqno == 0) {
-    file_to_ingest->largest_seqno = 0;
-    file_to_ingest->smallest_seqno = 0;
-    return Status::OK();
+  const auto tp = table_reader->GetTableProperties();
+  const bool has_largest_seqno = tp->HasKeyLargestSeqno();
+  SequenceNumber largest_seqno = tp->key_largest_seqno;
+  if (has_largest_seqno) {
+    file_to_ingest->largest_seqno = largest_seqno;
+    if (largest_seqno == 0) {
+      file_to_ingest->smallest_seqno = 0;
+      return Status::OK();
+    }
+    if (tp->HasKeySmallestSeqno()) {
+      file_to_ingest->smallest_seqno = tp->key_smallest_seqno;
+      return Status::OK();
+    }
   }
-  // The following file scan is only executed when ingesting files with
-  // non-zero seqno.
-  // TODO: record smallest_seqno in table properties to avoid the
-  // file scan here.
-  SequenceNumber smallest_seqno = kMaxSequenceNumber;
 
+  // For older SST files they may not be recorded in table properties, so
+  // we scan the file to find out.
+  TEST_SYNC_POINT(
+      "ExternalSstFileIngestionJob::GetSeqnoBoundaryForFile:FileScan");
+  SequenceNumber smallest_seqno = kMaxSequenceNumber;
   SequenceNumber largest_seqno_from_iter = 0;
   ReadOptions ro;
   ro.fill_cache = ingestion_options_.fill_cache;

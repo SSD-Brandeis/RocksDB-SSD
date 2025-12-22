@@ -386,13 +386,17 @@ BENCH_LIB_SOURCES =                                             \
   tools/tool_hooks.cc                                           \
   tools/simulated_hybrid_file_system.cc                         \
 
-CACHE_BENCH_LIB_SOURCES =					                              \
+CACHE_BENCH_LIB_SOURCES =                                       \
   cache/cache_bench_tool.cc                                     \
+
+POINT_LOCK_BENCH_LIB_SOURCES =                                  \
+  utilities/transactions/lock/point/point_lock_bench_tool.cc    \
 
 STRESS_LIB_SOURCES =                                           \
   db_stress_tool/batched_ops_stress.cc                         \
   db_stress_tool/cf_consistency_stress.cc                      \
   db_stress_tool/db_stress_common.cc                           \
+  db_stress_tool/db_stress_compaction_service.cc               \
   db_stress_tool/db_stress_compression_manager.cc              \
   db_stress_tool/db_stress_driver.cc                           \
   db_stress_tool/db_stress_filters.cc                          \
@@ -490,6 +494,7 @@ TEST_MAIN_SOURCES =                                                     \
   db/db_clip_test.cc                                                    \
   db/db_dynamic_level_test.cc                                           \
   db/db_encryption_test.cc                                              \
+  db/db_etc3_test.cc                                                    \
   db/db_flush_test.cc                                                   \
   db/db_follower_test.cc						                                    \
   db/db_readonly_with_timestamp_test.cc                                 \
@@ -651,6 +656,7 @@ TEST_MAIN_SOURCES =                                                     \
   utilities/transactions/lock/range/range_locking_test.cc               \
   utilities/transactions/transaction_test.cc                            \
   utilities/transactions/lock/point/point_lock_manager_test.cc          \
+  utilities/transactions/lock/point/point_lock_manager_stress_test.cc   \
   utilities/transactions/write_prepared_transaction_test.cc             \
   utilities/transactions/write_unprepared_transaction_test.cc           \
   utilities/transactions/write_committed_transaction_ts_test.cc         \

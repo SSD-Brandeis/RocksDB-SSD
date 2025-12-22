@@ -200,10 +200,13 @@ TEST_F(OptionsSettableTest, BlockBasedTableOptionsAllFieldsSettable) {
       "verify_compression=true;read_amp_bytes_per_bit=0;"
       "enable_index_compression=false;"
       "block_align=true;"
+      "super_block_alignment_size=65536;"
+      "super_block_alignment_space_overhead_ratio=4096;"
       "max_auto_readahead_size=0;"
       "prepopulate_block_cache=kDisable;"
       "initial_auto_readahead_size=0;"
-      "num_file_reads_for_auto_readahead=0",
+      "num_file_reads_for_auto_readahead=0;"
+      "fail_if_no_udi_on_open=true",
       new_bbto));
 
   ASSERT_EQ(unset_bytes_base,
@@ -274,8 +277,8 @@ TEST_F(OptionsSettableTest, TablePropertiesAllFieldsSettable) {
       "property_collectors_names=;prefix_extractor_name=;db_host_id="
       "64625F686F73745F6964;db_session_id=64625F73657373696F6E5F6964;creation_"
       "time=0;num_data_blocks=123;index_value_is_delta_encoded=0;top_level_"
-      "index_"
-      "size=0;data_size=100;merge_operator_name=;index_partitions=0;file_"
+      "index_size=0;data_size=100;uncompressed_data_size=1234;"
+      "merge_operator_name=;index_partitions=0;file_"
       "creation_time=0;raw_value_size=0;index_size=200;user_collected_"
       "properties={757365725F6B6579=757365725F76616C7565;};tail_start_offset=0;"
       "seqno_to_time_mapping=;raw_key_size=0;slow_compression_estimated_data_"
@@ -288,7 +291,8 @@ TEST_F(OptionsSettableTest, TablePropertiesAllFieldsSettable) {
       "0;column_family_"
       "name=64656661756C74;user_defined_timestamps_persisted=1;num_entries=100;"
       "external_sst_file_global_seqno_offset=0;num_merge_operands=0;index_key_"
-      "is_user_key=0;key_largest_seqno=18446744073709551615;",
+      "is_user_key=0;key_largest_seqno=18446744073709551615;key_smallest_seqno="
+      "18;",
       new_tp));
 
   // All bytes are set from the parse
@@ -404,6 +408,7 @@ TEST_F(OptionsSettableTest, DBOptionsAllFieldsSettable) {
                              "skip_stats_update_on_db_open=false;"
                              "skip_checking_sst_file_sizes_on_db_open=false;"
                              "max_manifest_file_size=4295009941;"
+                             "max_manifest_space_amp_pct=321;"
                              "db_log_dir=path/to/db_log_dir;"
                              "writable_file_max_buffer_size=1048576;"
                              "paranoid_checks=true;"
@@ -606,6 +611,7 @@ TEST_F(OptionsSettableTest, ColumnFamilyOptionsAllFieldsSettable) {
       "max_sequential_skip_in_iterations=4294971408;"
       "arena_block_size=1893;"
       "target_file_size_multiplier=35;"
+      "target_file_size_is_upper_bound=false;"
       "min_write_buffer_number_to_merge=9;"
       "max_write_buffer_number=84;"
       "write_buffer_size=1653;"
@@ -680,9 +686,11 @@ TEST_F(OptionsSettableTest, ColumnFamilyOptionsAllFieldsSettable) {
       "bottommost_file_compaction_delay=7200;"
       "uncache_aggressiveness=1234;"
       "paranoid_memory_checks=1;"
+      "memtable_veirfy_per_key_checksum_on_seek=1;"
       "memtable_op_scan_flush_trigger=123;"
       "memtable_avg_op_scan_flush_trigger=12;"
-      "cf_allow_ingest_behind=1;",
+      "cf_allow_ingest_behind=1;"
+      "verify_output_flags=2049;",
       new_options));
 
   ASSERT_NE(new_options->blob_cache.get(), nullptr);

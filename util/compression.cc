@@ -162,7 +162,7 @@ class CompressorBase : public Compressor {
   CompressionOptions opts_;
 };
 
-class BuiltinCompressorV1 : public CompressorBase {
+class BuiltinCompressorV1 final : public CompressorBase {
  public:
   const char* Name() const override { return "BuiltinCompressorV1"; }
 
@@ -173,6 +173,10 @@ class BuiltinCompressorV1 : public CompressorBase {
   }
 
   CompressionType GetPreferredCompressionType() const override { return type_; }
+
+  std::unique_ptr<Compressor> Clone() const override {
+    return std::make_unique<BuiltinCompressorV1>(opts_, type_);
+  }
 
   Status CompressBlock(Slice uncompressed_data, char* compressed_output,
                        size_t* compressed_output_size,
@@ -226,9 +230,13 @@ class CompressorWithSimpleDictBase : public CompressorBase {
   // NOTE: empty dict is equivalent to no dict
   Slice GetSerializedDict() const override { return dict_data_; }
 
+  std::unique_ptr<Compressor> Clone() const override {
+    return CloneForDict(std::string{dict_data_});
+  }
+
   std::unique_ptr<Compressor> MaybeCloneSpecialized(
       CacheEntryRole /*block_type*/,
-      DictSampleArgs&& dict_samples) final override {
+      DictSampleArgs&& dict_samples) const final override {
     assert(dict_samples.Verify());
     if (dict_samples.empty()) {
       // Nothing to specialize on
@@ -238,7 +246,8 @@ class CompressorWithSimpleDictBase : public CompressorBase {
     }
   }
 
-  virtual std::unique_ptr<Compressor> CloneForDict(std::string&& dict_data) = 0;
+  virtual std::unique_ptr<Compressor> CloneForDict(
+      std::string&& dict_data) const = 0;
 
  protected:
   const std::string dict_data_;
@@ -247,7 +256,7 @@ class CompressorWithSimpleDictBase : public CompressorBase {
 // NOTE: the legacy behavior is to pretend to use dictionary compression when
 // enabled, including storing a dictionary block, but to ignore it. That is
 // matched here.
-class BuiltinSnappyCompressorV2 : public CompressorWithSimpleDictBase {
+class BuiltinSnappyCompressorV2 final : public CompressorWithSimpleDictBase {
  public:
   using CompressorWithSimpleDictBase::CompressorWithSimpleDictBase;
 
@@ -257,7 +266,8 @@ class BuiltinSnappyCompressorV2 : public CompressorWithSimpleDictBase {
     return kSnappyCompression;
   }
 
-  std::unique_ptr<Compressor> CloneForDict(std::string&& dict_data) override {
+  std::unique_ptr<Compressor> CloneForDict(
+      std::string&& dict_data) const override {
     return std::make_unique<BuiltinSnappyCompressorV2>(opts_,
                                                        std::move(dict_data));
   }
@@ -339,7 +349,7 @@ std::pair<char*, size_t> StartCompressBlockV2(Slice uncompressed_data,
   return {alg_output, alg_max_output_size};
 }
 
-class BuiltinZlibCompressorV2 : public CompressorWithSimpleDictBase {
+class BuiltinZlibCompressorV2 final : public CompressorWithSimpleDictBase {
  public:
   using CompressorWithSimpleDictBase::CompressorWithSimpleDictBase;
 
@@ -349,7 +359,8 @@ class BuiltinZlibCompressorV2 : public CompressorWithSimpleDictBase {
     return kZlibCompression;
   }
 
-  std::unique_ptr<Compressor> CloneForDict(std::string&& dict_data) override {
+  std::unique_ptr<Compressor> CloneForDict(
+      std::string&& dict_data) const override {
     return std::make_unique<BuiltinZlibCompressorV2>(opts_,
                                                      std::move(dict_data));
   }
@@ -437,7 +448,7 @@ class BuiltinZlibCompressorV2 : public CompressorWithSimpleDictBase {
   }
 };
 
-class BuiltinBZip2CompressorV2 : public CompressorWithSimpleDictBase {
+class BuiltinBZip2CompressorV2 final : public CompressorWithSimpleDictBase {
  public:
   using CompressorWithSimpleDictBase::CompressorWithSimpleDictBase;
 
@@ -447,7 +458,8 @@ class BuiltinBZip2CompressorV2 : public CompressorWithSimpleDictBase {
     return kBZip2Compression;
   }
 
-  std::unique_ptr<Compressor> CloneForDict(std::string&& dict_data) override {
+  std::unique_ptr<Compressor> CloneForDict(
+      std::string&& dict_data) const override {
     return std::make_unique<BuiltinBZip2CompressorV2>(opts_,
                                                       std::move(dict_data));
   }
@@ -516,7 +528,7 @@ class BuiltinBZip2CompressorV2 : public CompressorWithSimpleDictBase {
   }
 };
 
-class BuiltinLZ4CompressorV2 : public CompressorWithSimpleDictBase {
+class BuiltinLZ4CompressorV2WithDict : public CompressorWithSimpleDictBase {
  public:
   using CompressorWithSimpleDictBase::CompressorWithSimpleDictBase;
 
@@ -526,9 +538,10 @@ class BuiltinLZ4CompressorV2 : public CompressorWithSimpleDictBase {
     return kLZ4Compression;
   }
 
-  std::unique_ptr<Compressor> CloneForDict(std::string&& dict_data) override {
-    return std::make_unique<BuiltinLZ4CompressorV2>(opts_,
-                                                    std::move(dict_data));
+  std::unique_ptr<Compressor> CloneForDict(
+      std::string&& dict_data) const override {
+    return std::make_unique<BuiltinLZ4CompressorV2WithDict>(
+        opts_, std::move(dict_data));
   }
 
   ManagedWorkingArea ObtainWorkingArea() override {
@@ -611,7 +624,78 @@ class BuiltinLZ4CompressorV2 : public CompressorWithSimpleDictBase {
   }
 };
 
-class BuiltinLZ4HCCompressorV2 : public CompressorWithSimpleDictBase {
+class BuiltinLZ4CompressorV2NoDict final
+    : public BuiltinLZ4CompressorV2WithDict {
+ public:
+  BuiltinLZ4CompressorV2NoDict(const CompressionOptions& opts)
+      : BuiltinLZ4CompressorV2WithDict(opts, /*dict_data=*/{}) {}
+
+  std::unique_ptr<Compressor> Clone() const override {
+    return std::make_unique<BuiltinLZ4CompressorV2NoDict>(opts_);
+  }
+
+  ManagedWorkingArea ObtainWorkingArea() override {
+    // Using an LZ4_stream_t between compressions and resetting with
+    // LZ4_resetStream_fast is actually slower than using a fresh LZ4_stream_t
+    // each time, or not involving a stream at all. Similarly, using an extState
+    // does not seem to offer a performance boost, perhaps a small regression.
+    return {};
+  }
+
+  void ReleaseWorkingArea(WorkingArea* wa) override {
+    // Should not be called
+    (void)wa;
+    assert(wa == nullptr);
+  }
+
+  Status CompressBlock(Slice uncompressed_data, char* compressed_output,
+                       size_t* compressed_output_size,
+                       CompressionType* out_compression_type,
+                       ManagedWorkingArea* wa) override {
+#ifdef LZ4
+    (void)wa;
+    auto [alg_output, alg_max_output_size] = StartCompressBlockV2(
+        uncompressed_data, compressed_output, *compressed_output_size);
+    if (alg_max_output_size == 0) {
+      // Compression bypassed
+      *compressed_output_size = 0;
+      *out_compression_type = kNoCompression;
+      return Status::OK();
+    }
+    int acceleration;
+    if (opts_.level < 0) {
+      acceleration = -opts_.level;
+    } else {
+      acceleration = 1;
+    }
+    auto outlen =
+        LZ4_compress_fast(uncompressed_data.data(), alg_output,
+                          static_cast<int>(uncompressed_data.size()),
+                          static_cast<int>(alg_max_output_size), acceleration);
+    if (outlen > 0) {
+      // Compression kept/successful
+      size_t output_size = static_cast<size_t>(
+          outlen + /*header size*/ (alg_output - compressed_output));
+      assert(output_size <= *compressed_output_size);
+      *compressed_output_size = output_size;
+      *out_compression_type = kLZ4Compression;
+      return Status::OK();
+    }
+    // Compression rejected
+    *compressed_output_size = 1;
+#else
+    (void)uncompressed_data;
+    (void)compressed_output;
+    (void)wa;
+    // Compression bypassed (not supported)
+    *compressed_output_size = 0;
+#endif
+    *out_compression_type = kNoCompression;
+    return Status::OK();
+  }
+};
+
+class BuiltinLZ4HCCompressorV2 final : public CompressorWithSimpleDictBase {
  public:
   using CompressorWithSimpleDictBase::CompressorWithSimpleDictBase;
 
@@ -621,7 +705,8 @@ class BuiltinLZ4HCCompressorV2 : public CompressorWithSimpleDictBase {
     return kLZ4HCCompression;
   }
 
-  std::unique_ptr<Compressor> CloneForDict(std::string&& dict_data) override {
+  std::unique_ptr<Compressor> CloneForDict(
+      std::string&& dict_data) const override {
     return std::make_unique<BuiltinLZ4HCCompressorV2>(opts_,
                                                       std::move(dict_data));
   }
@@ -706,7 +791,7 @@ class BuiltinLZ4HCCompressorV2 : public CompressorWithSimpleDictBase {
   }
 };
 
-class BuiltinXpressCompressorV2 : public CompressorWithSimpleDictBase {
+class BuiltinXpressCompressorV2 final : public CompressorWithSimpleDictBase {
  public:
   using CompressorWithSimpleDictBase::CompressorWithSimpleDictBase;
 
@@ -716,7 +801,8 @@ class BuiltinXpressCompressorV2 : public CompressorWithSimpleDictBase {
     return kXpressCompression;
   }
 
-  std::unique_ptr<Compressor> CloneForDict(std::string&& dict_data) override {
+  std::unique_ptr<Compressor> CloneForDict(
+      std::string&& dict_data) const override {
     return std::make_unique<BuiltinXpressCompressorV2>(opts_,
                                                        std::move(dict_data));
   }
@@ -755,7 +841,7 @@ class BuiltinXpressCompressorV2 : public CompressorWithSimpleDictBase {
   }
 };
 
-class BuiltinZSTDCompressorV2 : public CompressorBase {
+class BuiltinZSTDCompressorV2 final : public CompressorBase {
  public:
   explicit BuiltinZSTDCompressorV2(const CompressionOptions& opts,
                                    CompressionDict&& dict = {})
@@ -764,6 +850,13 @@ class BuiltinZSTDCompressorV2 : public CompressorBase {
   const char* Name() const override { return "BuiltinZSTDCompressorV2"; }
 
   CompressionType GetPreferredCompressionType() const override { return kZSTD; }
+
+  std::unique_ptr<Compressor> Clone() const override {
+    CompressionDict dict_copy{dict_.GetRawDict().ToString(), kZSTD,
+                              opts_.level};
+    return std::make_unique<BuiltinZSTDCompressorV2>(opts_,
+                                                     std::move(dict_copy));
+  }
 
   size_t GetMaxSampleSizeIfWantDict(
       CacheEntryRole /*block_type*/) const override {
@@ -880,7 +973,8 @@ class BuiltinZSTDCompressorV2 : public CompressorBase {
   }
 
   std::unique_ptr<Compressor> MaybeCloneSpecialized(
-      CacheEntryRole /*block_type*/, DictSampleArgs&& dict_samples) override {
+      CacheEntryRole /*block_type*/,
+      DictSampleArgs&& dict_samples) const override {
     assert(dict_samples.Verify());
     if (dict_samples.empty()) {
       // Nothing to specialize on
@@ -917,7 +1011,7 @@ class BuiltinZSTDCompressorV2 : public CompressorBase {
 
 // NOTE: this implementation is intentionally SIMPLE based on existing code
 // and NOT EFFICIENT because this is an old/deprecated format.
-class BuiltinDecompressorV1 : public Decompressor {
+class BuiltinDecompressorV1 final : public Decompressor {
  public:
   const char* Name() const override { return "BuiltinDecompressorV1"; }
 
@@ -969,7 +1063,7 @@ class BuiltinDecompressorV1 : public Decompressor {
   }
 };
 
-class BuiltinCompressionManagerV1 : public CompressionManager {
+class BuiltinCompressionManagerV1 final : public CompressionManager {
  public:
   BuiltinCompressionManagerV1() = default;
   ~BuiltinCompressionManagerV1() override = default;
@@ -1292,7 +1386,7 @@ class BuiltinDecompressorV2 : public Decompressor {
   }
 };
 
-class BuiltinDecompressorV2SnappyOnly : public BuiltinDecompressorV2 {
+class BuiltinDecompressorV2SnappyOnly final : public BuiltinDecompressorV2 {
  public:
   const char* Name() const override {
     return "BuiltinDecompressorV2SnappyOnly";
@@ -1320,7 +1414,7 @@ class BuiltinDecompressorV2SnappyOnly : public BuiltinDecompressorV2 {
   }
 };
 
-class BuiltinDecompressorV2WithDict : public BuiltinDecompressorV2 {
+class BuiltinDecompressorV2WithDict final : public BuiltinDecompressorV2 {
  public:
   explicit BuiltinDecompressorV2WithDict(const Slice& dict) : dict_(dict) {}
 
@@ -1413,7 +1507,7 @@ class BuiltinDecompressorV2OptimizeZstd : public BuiltinDecompressorV2 {
                            std::unique_ptr<Decompressor>* /*out*/) override;
 };
 
-class BuiltinDecompressorV2OptimizeZstdWithDict
+class BuiltinDecompressorV2OptimizeZstdWithDict final
     : public BuiltinDecompressorV2OptimizeZstd {
  public:
   explicit BuiltinDecompressorV2OptimizeZstdWithDict(const Slice& dict)
@@ -1477,7 +1571,7 @@ Status BuiltinDecompressorV2OptimizeZstd::MaybeCloneForDict(
       serialized_dict);
   return Status::OK();
 }
-class BuiltinCompressionManagerV2 : public CompressionManager {
+class BuiltinCompressionManagerV2 final : public CompressionManager {
  public:
   BuiltinCompressionManagerV2() = default;
   ~BuiltinCompressionManagerV2() override = default;
@@ -1508,7 +1602,7 @@ class BuiltinCompressionManagerV2 : public CompressionManager {
       case kBZip2Compression:
         return std::make_unique<BuiltinBZip2CompressorV2>(opts);
       case kLZ4Compression:
-        return std::make_unique<BuiltinLZ4CompressorV2>(opts);
+        return std::make_unique<BuiltinLZ4CompressorV2NoDict>(opts);
       case kLZ4HCCompression:
         return std::make_unique<BuiltinLZ4HCCompressorV2>(opts);
       case kXpressCompression:

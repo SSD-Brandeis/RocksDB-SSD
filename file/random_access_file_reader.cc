@@ -80,11 +80,23 @@ inline void RecordIOStats(Statistics* stats, Temperature file_temperature,
         RecordTick(stats, WARM_FILE_READ_BYTES, size);
         RecordTick(stats, WARM_FILE_READ_COUNT, 1);
         break;
+      case Temperature::kCool:
+        IOSTATS_ADD(file_io_stats_by_temperature.cool_file_bytes_read, size);
+        IOSTATS_ADD(file_io_stats_by_temperature.cool_file_read_count, 1);
+        RecordTick(stats, COOL_FILE_READ_BYTES, size);
+        RecordTick(stats, COOL_FILE_READ_COUNT, 1);
+        break;
       case Temperature::kCold:
         IOSTATS_ADD(file_io_stats_by_temperature.cold_file_bytes_read, size);
         IOSTATS_ADD(file_io_stats_by_temperature.cold_file_read_count, 1);
         RecordTick(stats, COLD_FILE_READ_BYTES, size);
         RecordTick(stats, COLD_FILE_READ_COUNT, 1);
+        break;
+      case Temperature::kIce:
+        IOSTATS_ADD(file_io_stats_by_temperature.ice_file_bytes_read, size);
+        IOSTATS_ADD(file_io_stats_by_temperature.ice_file_read_count, 1);
+        RecordTick(stats, ICE_FILE_READ_BYTES, size);
+        RecordTick(stats, ICE_FILE_READ_COUNT, 1);
         break;
       default:
         break;
@@ -491,6 +503,13 @@ IOStatus RandomAccessFileReader::PrepareIOOptions(const ReadOptions& ro,
   }
 }
 
+// Notes for when direct_io is enabled:
+// Unless req.offset, req.len, req.scratch are all already aligned,
+// RandomAccessFileReader will creats aligned requests and aligned buffer for
+// the request. User should only provide either req.scratch or aligned_buf. If
+// only req.scratch is provided, result will be copied from allocated aligned
+// buffer to req.scratch. If only alignd_buf is provided, it will be set to
+// the ailgned buf allocated by RandomAccessFileReader and saves a copy.
 IOStatus RandomAccessFileReader::ReadAsync(
     FSReadRequest& req, const IOOptions& opts,
     std::function<void(FSReadRequest&, void*)> cb, void* cb_arg,

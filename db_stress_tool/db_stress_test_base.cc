@@ -25,6 +25,7 @@
 #include "db_stress_tool/db_stress_filters.h"
 #include "db_stress_tool/db_stress_table_properties_collector.h"
 #include "db_stress_tool/db_stress_wide_merge_operator.h"
+#include "file/file_util.h"
 #include "options/options_parser.h"
 #include "rocksdb/convenience.h"
 #include "rocksdb/filter_policy.h"
@@ -194,10 +195,10 @@ std::shared_ptr<Cache> StressTest::NewCache(size_t capacity,
     exit(1);
   } else if (EndsWith(cache_type, "hyper_clock_cache")) {
     size_t estimated_entry_charge;
-    if (cache_type == "fixed_hyper_clock_cache" ||
-        cache_type == "hyper_clock_cache") {
+    if (cache_type == "fixed_hyper_clock_cache") {
       estimated_entry_charge = FLAGS_block_size;
-    } else if (cache_type == "auto_hyper_clock_cache") {
+    } else if (cache_type == "auto_hyper_clock_cache" ||
+               cache_type == "hyper_clock_cache") {
       estimated_entry_charge = 0;
     } else {
       fprintf(stderr, "Cache type not supported.");
@@ -349,7 +350,6 @@ bool StressTest::BuildOptionsTable() {
            "1",
            "2",
        }},
-      {"max_sequential_skip_in_iterations", {"4", "8", "12"}},
       {"block_based_table_factory",
        {
            keepRibbonFilterPolicyOnly ? "{filter_policy=ribbonfilter:2.35}"
@@ -362,6 +362,13 @@ bool StressTest::BuildOptionsTable() {
                std::to_string(FLAGS_block_size + (FLAGS_seed & 0xFFFU)) + "}",
        }},
   };
+  if (FLAGS_use_multiscan == 0) {
+    // TODO: this can fail MultiScan when consecutive data blocks share the
+    // same user at boundary. MultiScan uses user key to locate the block to
+    // reach which can move the scan earlier than its current block.
+    options_tbl.emplace("max_sequential_skip_in_iterations",
+                        std::vector<std::string>{"4", "8", "12"});
+  }
   if (FLAGS_compaction_style == kCompactionStyleUniversal &&
       FLAGS_universal_max_read_amp > 0) {
     // level0_file_num_compaction_trigger needs to be at most max_read_amp
@@ -428,6 +435,9 @@ bool StressTest::BuildOptionsTable() {
     options_tbl.emplace(
         "file_temperature_age_thresholds",
         std::vector<std::string>{
+            "{{temperature=kWarm;age=10}:{temperature=kCool;age=30}:{"
+            "temperature=kCold;age=100}:{"
+            "temperature=kIce;age=300}}",
             "{{temperature=kWarm;age=30}:{temperature=kCold;age=300}}",
             "{{temperature=kCold;age=100}}", "{}"});
     options_tbl.emplace(
@@ -1690,7 +1700,12 @@ Status StressTest::TestMultiScan(ThreadState* thread,
 
   std::vector<std::string> start_key_strs;
   std::vector<std::string> end_key_strs;
-  MultiScanArgs scan_opts;
+  // TODO support reverse BytewiseComparator in the stress test
+  MultiScanArgs scan_opts(options_.comparator);
+  scan_opts.use_async_io =
+      FLAGS_multiscan_use_async_io &&
+      CheckFSFeatureSupport(options_.env->GetFileSystem().get(),
+                            FSSupportedOps::kAsyncIO);
   start_key_strs.reserve(num_scans);
   end_key_strs.reserve(num_scans);
 
@@ -1816,11 +1831,14 @@ Status StressTest::TestMultiScan(ThreadState* thread,
                      key, op_logs, verify_func, &diverged);
 
       if (diverged) {
-        const std::vector<ScanOptions>& scanoptions = scan_opts.GetScanRanges();
-        for (const auto& t : scanoptions) {
-          fprintf(stdout, "Multiscan options: %s to %s \n",
-                  t.range.start.value().ToString(true).c_str(),
-                  t.range.limit.value().ToString(true).c_str());
+        if (thread->shared->HasVerificationFailedYet()) {
+          const std::vector<ScanOptions>& scanoptions =
+              scan_opts.GetScanRanges();
+          for (const auto& t : scanoptions) {
+            fprintf(stdout, "Multiscan options: %s to %s \n",
+                    t.range.start.value().ToString(true).c_str(),
+                    t.range.limit.value().ToString(true).c_str());
+          }
         }
         break;
       }
@@ -3516,8 +3534,9 @@ void StressTest::PrintEnv() const {
   fprintf(stdout, "Verification only         : %s\n",
           FLAGS_verification_only ? "true" : "false");
 
-  const char* memtablerep = "";
+  const char* memtablerep;
   switch (FLAGS_rep_factory) {
+    default:
     case kSkipList:
       memtablerep = "skip_list";
       break;
@@ -3666,8 +3685,21 @@ void StressTest::Open(SharedState* shared, bool reopen) {
               "Compaction\n");
       exit(1);
     }
-    options_.compaction_service =
-        std::make_shared<DbStressCompactionService>(shared);
+    // Each DB open/reopen gets a fresh compaction service instance with a clean
+    // aborted_ state
+    auto compaction_service = std::make_shared<DbStressCompactionService>(
+        shared, FLAGS_remote_compaction_failure_fall_back_to_local);
+
+    options_.compaction_service = compaction_service;
+  }
+
+  if (FLAGS_allow_resumption_one_in > 0) {
+    if (FLAGS_remote_compaction_worker_threads == 0) {
+      fprintf(stderr,
+              "allow_resumption or randomize_allow_resumption requires "
+              "remote_compaction_worker_threads > 0\n");
+      exit(1);
+    }
   }
 
   if ((options_.enable_blob_files || options_.enable_blob_garbage_collection ||
@@ -3943,6 +3975,8 @@ void StressTest::Open(SharedState* shared, bool reopen) {
             static_cast<size_t>(FLAGS_wp_snapshot_cache_bits);
         txn_db_options.wp_commit_cache_bits =
             static_cast<size_t>(FLAGS_wp_commit_cache_bits);
+        txn_db_options.use_per_key_point_lock_mgr =
+            FLAGS_use_per_key_point_lock_mgr;
         PrepareTxnDbOptions(shared, txn_db_options);
         s = TransactionDB::Open(options_, txn_db_options, FLAGS_db,
                                 cf_descriptors, &column_families_, &txn_db_);
@@ -4308,6 +4342,10 @@ void InitializeOptionsFromFlags(
       static_cast<BlockBasedTableOptions::IndexShorteningMode>(
           FLAGS_index_shortening);
   block_based_options.block_align = FLAGS_block_align;
+  block_based_options.super_block_alignment_size =
+      fLU64::FLAGS_super_block_alignment_size;
+  block_based_options.super_block_alignment_space_overhead_ratio =
+      fLU64::FLAGS_super_block_alignment_space_overhead_ratio;
   options.table_factory.reset(NewBlockBasedTableFactory(block_based_options));
   options.db_write_buffer_size = FLAGS_db_write_buffer_size;
   options.write_buffer_size = FLAGS_write_buffer_size;
@@ -4392,6 +4430,7 @@ void InitializeOptionsFromFlags(
     options.compression_opts.checksum = true;
   }
   options.max_manifest_file_size = FLAGS_max_manifest_file_size;
+  options.max_manifest_space_amp_pct = FLAGS_max_manifest_space_amp_pct;
   options.max_subcompactions = static_cast<uint32_t>(FLAGS_subcompactions);
   options.allow_concurrent_memtable_write =
       FLAGS_allow_concurrent_memtable_write;
@@ -4432,6 +4471,8 @@ void InitializeOptionsFromFlags(
       FLAGS_memtable_protection_bytes_per_key;
   options.block_protection_bytes_per_key = FLAGS_block_protection_bytes_per_key;
   options.paranoid_memory_checks = FLAGS_paranoid_memory_checks;
+  options.memtable_veirfy_per_key_checksum_on_seek =
+      FLAGS_memtable_veirfy_per_key_checksum_on_seek;
 
   // Integrated BlobDB
   options.enable_blob_files = FLAGS_enable_blob_files;

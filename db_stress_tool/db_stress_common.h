@@ -248,6 +248,7 @@ DECLARE_string(fs_uri);
 DECLARE_uint64(ops_per_thread);
 DECLARE_uint64(log2_keys_per_lock);
 DECLARE_uint64(max_manifest_file_size);
+DECLARE_int32(max_manifest_space_amp_pct);
 DECLARE_bool(in_place_update);
 DECLARE_string(memtablerep);
 DECLARE_int32(prefix_size);
@@ -275,6 +276,7 @@ DECLARE_string(last_level_temperature);
 DECLARE_string(default_write_temperature);
 DECLARE_string(default_temperature);
 DECLARE_bool(paranoid_memory_checks);
+DECLARE_bool(memtable_veirfy_per_key_checksum_on_seek);
 
 // Options for transaction dbs.
 // Use TransactionDB (a.k.a. Pessimistic Transaction DB)
@@ -284,6 +286,7 @@ DECLARE_bool(use_txn);
 // Options for TransactionDB (a.k.a. Pessimistic Transaction DB)
 DECLARE_uint64(txn_write_policy);
 DECLARE_bool(unordered_write);
+DECLARE_bool(use_per_key_point_lock_mgr);
 
 // Options for OptimisticTransactionDB
 DECLARE_bool(use_optimistic_txn);
@@ -408,6 +411,8 @@ DECLARE_uint64(max_sequential_skip_in_iterations);
 DECLARE_bool(enable_sst_partitioner_factory);
 DECLARE_bool(enable_do_not_compress_roles);
 DECLARE_bool(block_align);
+DECLARE_uint64(super_block_alignment_size);
+DECLARE_uint64(super_block_alignment_space_overhead_ratio);
 DECLARE_uint32(lowest_used_cache_tier);
 DECLARE_bool(enable_custom_split_merge);
 DECLARE_uint32(adm_policy);
@@ -424,12 +429,15 @@ DECLARE_uint32(commit_bypass_memtable_one_in);
 DECLARE_bool(track_and_verify_wals);
 DECLARE_int32(remote_compaction_worker_threads);
 DECLARE_int32(remote_compaction_worker_interval);
+DECLARE_bool(remote_compaction_failure_fall_back_to_local);
+DECLARE_int32(allow_resumption_one_in);
 DECLARE_bool(auto_refresh_iterator_with_snapshot);
 DECLARE_uint32(memtable_op_scan_flush_trigger);
 DECLARE_uint32(memtable_avg_op_scan_flush_trigger);
 DECLARE_uint32(ingest_wbwi_one_in);
 DECLARE_bool(universal_reduce_file_locking);
 DECLARE_bool(use_multiscan);
+DECLARE_bool(multiscan_use_async_io);
 
 // Compaction deletion trigger declarations for stress testing
 DECLARE_bool(enable_compaction_on_deletion_trigger);

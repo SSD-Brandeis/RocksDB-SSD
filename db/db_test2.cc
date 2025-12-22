@@ -5205,6 +5205,7 @@ TEST_F(DBTest2, SwitchMemtableRaceWithNewManifest) {
   Options options = CurrentOptions();
   DestroyAndReopen(options);
   options.max_manifest_file_size = 10;
+  options.max_manifest_space_amp_pct = 0;
   options.create_if_missing = true;
   CreateAndReopenWithCF({"pikachu"}, options);
   ASSERT_EQ(2, handles_.size());
@@ -5896,6 +5897,7 @@ TEST_P(RenameCurrentTest, Flush) {
   Destroy(last_options_);
   Options options = GetDefaultOptions();
   options.max_manifest_file_size = 1;
+  options.max_manifest_space_amp_pct = 0;
   options.create_if_missing = true;
   Reopen(options);
   ASSERT_OK(Put("key", "value"));
@@ -5915,6 +5917,7 @@ TEST_P(RenameCurrentTest, Compaction) {
   Destroy(last_options_);
   Options options = GetDefaultOptions();
   options.max_manifest_file_size = 1;
+  options.max_manifest_space_amp_pct = 0;
   options.create_if_missing = true;
   Reopen(options);
   ASSERT_OK(Put("a", "a_value"));
@@ -6063,15 +6066,9 @@ TEST_F(DBTest2, VariousFileTemperatures) {
   };
 
   // We don't have enough non-unknown temps to confidently distinguish that
-  // a specific setting caused a specific outcome, in a single run. This is a
-  // reasonable work-around without blowing up test time. Only returns
-  // non-unknown temperatures.
-  auto RandomTemp = [] {
-    static std::vector<Temperature> temps = {
-        Temperature::kHot, Temperature::kWarm, Temperature::kCold};
-    return temps[Random::GetTLSInstance()->Uniform(
-        static_cast<int>(temps.size()))];
-  };
+  // a specific setting caused a specific outcome, in a single run. Using
+  // RandomKnownTemperature() is a reasonable work-around without blowing up
+  // test time.
 
   auto test_fs = std::make_shared<MyTestFS>(env_->GetFileSystem());
   std::unique_ptr<Env> env(new CompositeEnvWrapper(env_, test_fs));
@@ -6087,22 +6084,22 @@ TEST_F(DBTest2, VariousFileTemperatures) {
       options.env = env.get();
       test_fs->Reset();
       if (use_optimize) {
-        test_fs->optimize_manifest_temperature = RandomTemp();
+        test_fs->optimize_manifest_temperature = RandomKnownTemperature();
         test_fs->expected_manifest_temperature =
             test_fs->optimize_manifest_temperature;
-        test_fs->optimize_wal_temperature = RandomTemp();
+        test_fs->optimize_wal_temperature = RandomKnownTemperature();
         test_fs->expected_wal_temperature = test_fs->optimize_wal_temperature;
       }
       if (use_temp_options) {
-        options.metadata_write_temperature = RandomTemp();
+        options.metadata_write_temperature = RandomKnownTemperature();
         test_fs->expected_manifest_temperature =
             options.metadata_write_temperature;
         test_fs->expected_other_metadata_temperature =
             options.metadata_write_temperature;
-        options.wal_write_temperature = RandomTemp();
+        options.wal_write_temperature = RandomKnownTemperature();
         test_fs->expected_wal_temperature = options.wal_write_temperature;
-        options.last_level_temperature = RandomTemp();
-        options.default_write_temperature = RandomTemp();
+        options.last_level_temperature = RandomKnownTemperature();
+        options.default_write_temperature = RandomKnownTemperature();
       }
 
       DestroyAndReopen(options);

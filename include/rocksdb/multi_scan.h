@@ -97,7 +97,13 @@ class Scan {
 
     ScanIterator() : db_iter_(nullptr), valid_(false) {}
 
-    ~ScanIterator() { assert(status_.ok()); }
+    ~ScanIterator() {
+      if (!status_.ok()) {
+        fprintf(stderr, "ScanIterator status: %s\n",
+                status_.ToString().c_str());
+        assert(false);
+      }
+    }
 
     ScanIterator& operator++() {
       if (!valid_) {
@@ -155,8 +161,9 @@ class MultiScan {
   MultiScan(const ReadOptions& read_options, const MultiScanArgs& scan_opts,
             DB* db, ColumnFamilyHandle* cfh);
 
-  explicit MultiScan(std::unique_ptr<Iterator>&& db_iter)
-      : db_iter_(std::move(db_iter)) {}
+  explicit MultiScan(const Comparator* comp,
+                     std::unique_ptr<Iterator>&& db_iter)
+      : scan_opts_(comp), db_iter_(std::move(db_iter)) {}
 
   class MultiScanIterator {
    public:
@@ -183,6 +190,10 @@ class MultiScan {
           scan_(db_iter_.get()) {
       if (scan_opts_.empty()) {
         throw std::logic_error("Zero scans in multi-scan");
+      }
+      status_ = db_iter_->status();
+      if (!status_.ok()) {
+        throw MultiScanException(status_);
       }
       db_iter_->Seek(*scan_opts_[idx_].range.start);
       status_ = db_iter_->status();

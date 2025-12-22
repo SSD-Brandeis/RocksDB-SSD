@@ -226,6 +226,7 @@ class ExternalTableReaderAdapter : public TableReader {
       // external table reader
       props = std::make_shared<TableProperties>(*reader_->GetTableProperties());
       props->key_largest_seqno = 0;
+      props->key_smallest_seqno = 0;
     }
     return props;
   }
@@ -238,8 +239,8 @@ class ExternalTableReaderAdapter : public TableReader {
         "Get() not supported on external file iterator");
   }
 
-  virtual Status VerifyChecksum(const ReadOptions& /*ro*/,
-                                TableReaderCaller /*caller*/) override {
+  Status VerifyChecksum(const ReadOptions& /*ro*/, TableReaderCaller /*caller*/,
+                        bool /*meta_blocks_only*/ = false) override {
     return Status::OK();
   }
 
@@ -262,6 +263,7 @@ class ExternalTableBuilderAdapter : public TableBuilder {
     properties_.filter_size = 0;
     properties_.format_version = 0;
     properties_.key_largest_seqno = 0;
+    properties_.key_smallest_seqno = 0;
     properties_.column_family_id = topts.column_family_id;
     properties_.column_family_name = topts.column_family_name;
     properties_.db_id = topts.db_id;

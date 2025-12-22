@@ -364,6 +364,13 @@ static struct BlockBasedTableTypeInfo {
         {"block_align",
          {offsetof(struct BlockBasedTableOptions, block_align),
           OptionType::kBoolean, OptionVerificationType::kNormal}},
+        {"super_block_alignment_size",
+         {offsetof(struct BlockBasedTableOptions, super_block_alignment_size),
+          OptionType::kSizeT, OptionVerificationType::kNormal}},
+        {"super_block_alignment_space_overhead_ratio",
+         {offsetof(struct BlockBasedTableOptions,
+                   super_block_alignment_space_overhead_ratio),
+          OptionType::kSizeT, OptionVerificationType::kNormal}},
         {"pin_top_level_index_and_filter",
          {offsetof(struct BlockBasedTableOptions,
                    pin_top_level_index_and_filter),
@@ -399,6 +406,9 @@ static struct BlockBasedTableTypeInfo {
          {offsetof(struct BlockBasedTableOptions,
                    num_file_reads_for_auto_readahead),
           OptionType::kUInt64T, OptionVerificationType::kNormal}},
+        {"fail_if_no_udi_on_open",
+         {offsetof(struct BlockBasedTableOptions, fail_if_no_udi_on_open),
+          OptionType::kBoolean, OptionVerificationType::kNormal}},
     };
   }
 } block_based_table_type_info;
@@ -434,10 +444,10 @@ void BlockBasedTableFactory::InitializeOptions() {
   if (table_options_.no_block_cache) {
     table_options_.block_cache.reset();
   } else if (table_options_.block_cache == nullptr) {
-    LRUCacheOptions co;
-    // 32MB, the recommended minimum size for 64 shards, to reduce contention
-    co.capacity = 32 << 20;
-    table_options_.block_cache = NewLRUCache(co);
+    // Now using AutoHCC by default, with existing default size of 32MB
+    // which is just one cache shard in HCC
+    HyperClockCacheOptions hcc_opts{size_t{32} << 20};
+    table_options_.block_cache = hcc_opts.MakeSharedCache();
   }
   if (table_options_.block_size_deviation < 0 ||
       table_options_.block_size_deviation > 100) {
@@ -690,6 +700,22 @@ Status BlockBasedTableFactory::ValidateOptions(
     return Status::InvalidArgument(
         "block size exceeds maximum number (4GiB) allowed");
   }
+  if ((table_options_.super_block_alignment_size &
+       (table_options_.super_block_alignment_size - 1))) {
+    return Status::InvalidArgument(
+        "Super Block alignment requested but super block alignment size is not "
+        "a power of 2");
+  }
+  if (table_options_.super_block_alignment_size >
+      std::numeric_limits<uint32_t>::max()) {
+    return Status::InvalidArgument(
+        "Super block alignment size exceeds maximum number (4GiB) allowed");
+  }
+  if (table_options_.super_block_alignment_space_overhead_ratio > 0 &&
+      table_options_.super_block_alignment_space_overhead_ratio < 4) {
+    return Status::InvalidArgument(
+        "Super block alignment space overhead is too high");
+  }
   if (table_options_.data_block_index_type ==
           BlockBasedTableOptions::kDataBlockBinaryAndHash &&
       table_options_.data_block_hash_table_util_ratio <= 0) {
@@ -874,6 +900,14 @@ std::string BlockBasedTableFactory::GetPrintableOptions() const {
                ? "nullptr"
                : table_options_.filter_policy->Name());
   ret.append(buffer);
+  snprintf(buffer, kBufferSize, "  user_defined_index_factory: %s\n",
+           table_options_.user_defined_index_factory == nullptr
+               ? "nullptr"
+               : table_options_.user_defined_index_factory->Name());
+  ret.append(buffer);
+  snprintf(buffer, kBufferSize, "  fail_if_no_udi_on_open: %d\n",
+           table_options_.fail_if_no_udi_on_open);
+  ret.append(buffer);
   snprintf(buffer, kBufferSize, "  whole_key_filtering: %d\n",
            table_options_.whole_key_filtering);
   ret.append(buffer);
@@ -891,6 +925,15 @@ std::string BlockBasedTableFactory::GetPrintableOptions() const {
   ret.append(buffer);
   snprintf(buffer, kBufferSize, "  block_align: %d\n",
            table_options_.block_align);
+  ret.append(buffer);
+  snprintf(buffer, kBufferSize,
+           "  super_block_alignment_size: %" ROCKSDB_PRIszt "\n",
+           table_options_.super_block_alignment_size);
+  ret.append(buffer);
+  snprintf(buffer, kBufferSize,
+           "  super_block_alignment_space_overhead_ratio: %" ROCKSDB_PRIszt
+           "\n",
+           table_options_.super_block_alignment_space_overhead_ratio);
   ret.append(buffer);
   snprintf(buffer, kBufferSize,
            "  max_auto_readahead_size: %" ROCKSDB_PRIszt "\n",

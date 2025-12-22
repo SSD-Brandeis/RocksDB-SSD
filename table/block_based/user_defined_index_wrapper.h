@@ -41,7 +41,8 @@ class UserDefinedIndexBuilderWrapper : public IndexBuilder {
   Slice AddIndexEntry(const Slice& last_key_in_current_block,
                       const Slice* first_key_in_next_block,
                       const BlockHandle& block_handle,
-                      std::string* separator_scratch) override {
+                      std::string* separator_scratch,
+                      bool skip_delta_encoding) override {
     UserDefinedIndexBuilder::BlockHandle handle;
     handle.offset = block_handle.offset();
     handle.size = block_handle.size();
@@ -66,7 +67,7 @@ class UserDefinedIndexBuilderWrapper : public IndexBuilder {
     }
     return internal_index_builder_->AddIndexEntry(
         last_key_in_current_block, first_key_in_next_block, block_handle,
-        separator_scratch);
+        separator_scratch, skip_delta_encoding);
   }
 
   // Not supported with parallel compression
@@ -82,9 +83,11 @@ class UserDefinedIndexBuilderWrapper : public IndexBuilder {
     assert(false);
   }
   void FinishIndexEntry(const BlockHandle& block_handle,
-                        PreparedIndexEntry* entry) override {
+                        PreparedIndexEntry* entry,
+                        bool skip_delta_encoding) override {
     (void)block_handle;
     (void)entry;
+    (void)skip_delta_encoding;
     assert(false);
   }
 
@@ -155,6 +158,8 @@ class UserDefinedIndexBuilderWrapper : public IndexBuilder {
 
   size_t IndexSize() const override { return index_size_; }
 
+  uint64_t CurrentIndexSizeEstimate() const override { return 0; }
+
   bool separator_is_key_plus_seq() override {
     return internal_index_builder_->separator_is_key_plus_seq();
   }
@@ -189,11 +194,11 @@ class UserDefinedIndexIteratorWrapper
     status_ = ParseInternalKey(target, &pkey, /*log_err_key=*/false);
     if (status_.ok()) {
       status_ = udi_iter_->SeekAndGetResult(pkey.user_key, &result_);
-      if (status_.ok()) {
-        valid_ = result_.bound_check_result == IterBoundCheck::kInbound;
-        if (valid_) {
-          ikey_.Set(result_.key, 0, ValueType::kTypeValue);
-        }
+    }
+    if (status_.ok()) {
+      valid_ = result_.bound_check_result == IterBoundCheck::kInbound;
+      if (valid_) {
+        ikey_.Set(result_.key, 0, ValueType::kTypeValue);
       }
     } else {
       valid_ = false;
@@ -251,6 +256,10 @@ class UserDefinedIndexIteratorWrapper
     }
   }
 
+  IterBoundCheck UpperBoundCheckResult() override {
+    return result_.bound_check_result;
+  }
+
  private:
   std::unique_ptr<UserDefinedIndexIterator> udi_iter_;
   IterateResult result_;
@@ -285,7 +294,13 @@ class UserDefinedIndexReaderWrapper : public BlockBasedTable::IndexReader {
     }
     std::unique_ptr<UserDefinedIndexIterator> udi_iter =
         udi_reader_->NewIterator(read_options);
-    return new UserDefinedIndexIteratorWrapper(std::move(udi_iter));
+    if (udi_iter) {
+      InternalIteratorBase<IndexValue>* wrap_iter =
+          new UserDefinedIndexIteratorWrapper(std::move(udi_iter));
+      return wrap_iter;
+    }
+    return NewErrorInternalIterator<IndexValue>(
+        Status::NotFound("COuld not create UDI iterator"));
   }
 
   virtual Status CacheDependencies(

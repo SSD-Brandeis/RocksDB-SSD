@@ -724,6 +724,10 @@ DEFINE_uint64(txn_write_policy, 0,
               "TxnDBWritePolicy::WRITE_COMMITTED. Note that this should not be "
               "changed across crashes.");
 
+DEFINE_bool(use_per_key_point_lock_mgr, true,
+            "Use PointLockManager(false) or PerKeyPointLockManager(true) in "
+            "TransactionDB.");
+
 DEFINE_bool(use_optimistic_txn, false, "Use OptimisticTransactionDB.");
 DEFINE_uint64(occ_validation_policy, 1,
               "Optimistic Concurrency Control Validation Policy for "
@@ -853,6 +857,15 @@ DEFINE_int32(remote_compaction_worker_interval, 10,
              "Remote Compaction Worker Thread dequeue tasks every N "
              "milliseconds. (Default: 10ms)");
 
+DEFINE_bool(remote_compaction_failure_fall_back_to_local, true,
+            "If true, remote compaction failures will be ignored and "
+            "compactions will fall back to local and retried");
+
+DEFINE_int32(allow_resumption_one_in, 0,
+             "If non-zero, enable resumable compaction with 1/N probability "
+             "for each OpenAndCompact call.Requires "
+             "remote_compaction_worker_threads > 0");
+
 DEFINE_uint32(ingest_wbwi_one_in, 0,
               "If set, will call"
               "IngestWriteBatchWithIndex() instead of regular write operations "
@@ -965,7 +978,11 @@ DEFINE_uint64(log2_keys_per_lock, 2, "Log2 of number of keys per lock");
 static const bool FLAGS_log2_keys_per_lock_dummy __attribute__((__unused__)) =
     RegisterFlagValidator(&FLAGS_log2_keys_per_lock, &ValidateUint32Range);
 
-DEFINE_uint64(max_manifest_file_size, 16384, "Maximum size of a MANIFEST file");
+DEFINE_uint64(max_manifest_file_size, 16384,
+              "Maximum size of a MANIFEST file (without auto-tuning)");
+
+DEFINE_int32(max_manifest_space_amp_pct, 500,
+             "Max manifest space amp percentage for auto-tuning");
 
 DEFINE_bool(in_place_update, false, "On true, does inplace update in memtable");
 
@@ -1424,6 +1441,17 @@ DEFINE_bool(block_align,
             ROCKSDB_NAMESPACE::BlockBasedTableOptions().block_align,
             "BlockBasedTableOptions.block_align");
 
+DEFINE_uint64(
+    super_block_alignment_size,
+    ROCKSDB_NAMESPACE::BlockBasedTableOptions().super_block_alignment_size,
+    "BlockBasedTableOptions.super_block_alignment_size");
+
+DEFINE_uint64(
+    super_block_alignment_space_overhead_ratio,
+    ROCKSDB_NAMESPACE::BlockBasedTableOptions()
+        .super_block_alignment_space_overhead_ratio,
+    "BlockBasedTableOptions.super_block_alignment_space_overhead_ratio");
+
 DEFINE_uint32(
     lowest_used_cache_tier,
     static_cast<uint32_t>(ROCKSDB_NAMESPACE::Options().lowest_used_cache_tier),
@@ -1476,6 +1504,11 @@ DEFINE_bool(paranoid_memory_checks,
             ROCKSDB_NAMESPACE::Options().paranoid_memory_checks,
             "Sets CF option paranoid_memory_checks.");
 
+DEFINE_bool(
+    memtable_veirfy_per_key_checksum_on_seek,
+    ROCKSDB_NAMESPACE::Options().memtable_veirfy_per_key_checksum_on_seek,
+    "Sets CF option memtable_veirfy_per_key_checksum_on_seek.");
+
 DEFINE_uint32(commit_bypass_memtable_one_in, 0,
               "If greater than zero, transaction option will set "
               "commit_bypass_memtable to per every N transactions on average.");
@@ -1526,5 +1559,8 @@ DEFINE_bool(
 
 DEFINE_bool(use_multiscan, false,
             "If set, use the batched MultiScan API for scans.");
+
+DEFINE_bool(multiscan_use_async_io, false,
+            "If set, enable async_io for MultiScan operations.");
 
 #endif  // GFLAGS
