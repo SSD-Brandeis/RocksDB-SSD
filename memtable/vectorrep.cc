@@ -347,6 +347,7 @@ void VectorRep::Get(const LookupKey& k, void* callback_args,
   // 1. Start Copy Timer
   auto start_copy = std::chrono::high_resolution_clock::now();
 #endif
+//snpshot start
   rwlock_.ReadLock();
   VectorRep* vector_rep;
   std::shared_ptr<Bucket> bucket;
@@ -356,6 +357,7 @@ void VectorRep::Get(const LookupKey& k, void* callback_args,
     vector_rep = nullptr;
     bucket.reset(new Bucket(*bucket_));  // make a copy
   }
+  //snapshot end
   VectorRep::Iterator iter(vector_rep, immutable_ ? bucket_ : bucket, compare_);
   rwlock_.ReadUnlock();
 
