@@ -33,6 +33,20 @@
 
 namespace ROCKSDB_NAMESPACE {
 
+void DBImpl::PrintFullTreeSummary() const {
+  mutex_.Lock();
+  auto cfd = versions_->GetColumnFamilySet()->GetDefault();
+  Version* v = cfd->current();
+  v->Ref();
+  mutex_.Unlock();
+
+  v->PrintFullTreeSummary();
+
+  mutex_.Lock();
+  v->Unref();
+  mutex_.Unlock();
+}
+
 bool DBImpl::EnoughRoomForCompaction(
     ColumnFamilyData* cfd, const std::vector<CompactionInputFiles>& inputs,
     bool* sfm_reserved_compact_space, LogBuffer* log_buffer) {

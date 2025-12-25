@@ -111,7 +111,6 @@ class Iterator : public IteratorBase {
   // ReadOptions
   virtual void Prepare(const MultiScanArgs& /*scan_opts*/) {}
 
-  bool is_rq_iter = 0;
   int entries_skipped_ = 0;
   int entries_read_in_total_ = 0;
 };

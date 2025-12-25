@@ -140,6 +140,28 @@ void ArenaWrappedDBIter::MaybeAutoRefresh(bool is_seek,
 
 Status ArenaWrappedDBIter::Refresh() { return Refresh(nullptr); }
 
+// bool ArenaWrappedDBIter::CanPerformRQC(const Slice& start, const Slice& end) {
+//   auto cfd = cfh_->cfd();
+//   auto storage_info = cfd->current()->storage_info();
+//   if (storage_info->num_non_empty_levels() <= 1) {
+//     return false;
+//   }
+
+  
+
+//   return true;
+// }
+
+// Status ArenaWrappedDBIter::Refresh(Slice start, Slice end) {
+//   auto cfd = cfh_->cfd();
+//   auto range_lease_manager = cfd->GetRangeLeaseManager();
+//   if (!range_lease_manager->IsRangeLeased(start, end) &&
+//       CanPerformRQC(start, end)) {
+//     range_lease_manager->AcquireLease(start, end);
+//   }
+//   return Refresh();
+// }
+
 void ArenaWrappedDBIter::DoRefresh(const Snapshot* snapshot,
                                    [[maybe_unused]] uint64_t sv_number) {
   Env* env = db_iter_->env();

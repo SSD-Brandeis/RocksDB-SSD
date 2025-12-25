@@ -497,6 +497,9 @@ class DBImpl : public DB {
   Status LockWAL() override;
   Status UnlockWAL() override;
 
+  // Get each level state to print
+  void PrintFullTreeSummary() const override;
+
   SequenceNumber GetLatestSequenceNumber() const override;
 
   // IncreaseFullHistoryTsLow(ColumnFamilyHandle*, std::string) will acquire

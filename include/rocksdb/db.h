@@ -2239,6 +2239,10 @@ class DB {
   virtual Status TryCatchUpWithPrimary() {
     return Status::NotSupported("Supported only by secondary instance");
   }
+
+  virtual void PrintFullTreeSummary() const {
+    // Must be inmplemented by child class
+  }
 };
 
 struct WriteStallStatsMapKeys {

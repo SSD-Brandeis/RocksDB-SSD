@@ -2277,6 +2277,9 @@ struct ReadOptions {
   // an application level request that results in multiple RocksDB api calls
   const std::string* request_id = nullptr;
 
+  // // if true, range query-driven compaction will be performed
+  // bool rqc_enabled = false;
+
   // *** END per-request settings for internal team use only ***
 
   ReadOptions() {}

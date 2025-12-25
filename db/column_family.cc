@@ -576,6 +576,44 @@ void SuperVersionUnrefHandle(void* ptr) {
 }
 }  // anonymous namespace
 
+// bool RangeLeaseManager::AcquireLease(const Slice& start, const Slice& end) {
+//   std::lock_guard<std::mutex> lock(mutex_);
+
+//   for (const auto& lease : leases_) {
+//     if (user_comparator_->Compare(start, lease.end) <= 0 &&
+//         user_comparator_->Compare(end, lease.start) >= 0) {
+//       return false;
+//     }
+//   }
+
+//   leases_.emplace_back(start, end);
+//   return true;
+// }
+
+// void RangeLeaseManager::ReleaseLease(const Slice& start, const Slice& end) {
+//   std::lock_guard<std::mutex> lock(mutex_);
+//   auto it =
+//       std::find_if(leases_.begin(), leases_.end(), [&](const RangeLease& l) {
+//         return user_comparator_->Compare(start, l.start) == 0 &&
+//                user_comparator_->Compare(end, l.end) == 0;
+//       });
+//   if (it != leases_.end()) {
+//     leases_.erase(it);
+//   }
+// }
+
+// bool RangeLeaseManager::IsRangeLeased(const Slice& start, const Slice& end) {
+//   std::lock_guard<std::mutex> lock(mutex_);
+
+//   for (const auto& lease : leases_) {
+//     if (user_comparator_->Compare(start, lease.end) <= 0 &&
+//         user_comparator_->Compare(end, lease.start) >= 0) {
+//       return true;
+//     }
+//   }
+//   return false;
+// }
+
 std::vector<std::string> ColumnFamilyData::GetDbPaths() const {
   std::vector<std::string> paths;
   paths.reserve(ioptions_.cf_paths.size());
@@ -718,6 +756,7 @@ ColumnFamilyData::ColumnFamilyData(
               bbto->block_cache)));
     }
   }
+  // range_lease_manager_.reset(new RangeLeaseManager(cf_options.comparator));
 }
 
 // DB mutex held

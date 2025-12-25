@@ -68,6 +68,8 @@ class IteratorBase : public Cleanable {
   // state is already valid, like Next().
   virtual Status Refresh() { return Refresh(nullptr); }
 
+  // virtual Status Refresh(Slice /*start*/, Slice /*end*/) { return Refresh(); }
+
   // Similar to Refresh() but the iterator will be reading the latest DB state
   // under the given snapshot.
   virtual Status Refresh(const class Snapshot*) {

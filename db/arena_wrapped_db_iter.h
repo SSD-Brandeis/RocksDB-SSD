@@ -76,6 +76,8 @@ class ArenaWrappedDBIter : public Iterator {
 
   void Next() override {
     db_iter_->Next();
+    entries_read_in_total_ = db_iter_->entries_read_in_total_;
+    entries_skipped_ = db_iter_->entries_skipped_;
     MaybeAutoRefresh(false /* is_seek */, DBIter::kForward);
   }
 
@@ -94,6 +96,7 @@ class ArenaWrappedDBIter : public Iterator {
   Status GetProperty(std::string prop_name, std::string* prop) override;
 
   Status Refresh() override;
+  // Status Refresh(Slice start, Slice end) override;
   Status Refresh(const Snapshot*) override;
 
   bool PrepareValue() override { return db_iter_->PrepareValue(); }
@@ -101,6 +104,8 @@ class ArenaWrappedDBIter : public Iterator {
   void Prepare(const MultiScanArgs& scan_opts) override {
     db_iter_->Prepare(scan_opts);
   }
+
+  // bool CanPerformRQC(const Slice& start, const Slice& end);
 
   // FIXME: we could just pass SV in for mutable cf option, version and version
   // number, but this is used by SstFileReader which does not have a SV.

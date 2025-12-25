@@ -13,6 +13,7 @@
 #include <array>
 #include <cinttypes>
 #include <cstdio>
+#include <iostream>
 #include <list>
 #include <map>
 #include <set>
@@ -1790,6 +1791,50 @@ void LevelIterator::InitFileIterator(size_t new_file_index) {
 }
 
 }  // anonymous namespace
+
+void Version::PrintFullTreeSummary() {
+  #ifdef PROFILE
+  std::cout
+      << "\n====================== LSM-tree state =======================\n";
+
+  const ReadOptions ro;
+  const auto& ioptions = cfd_->ioptions();
+  const auto& mutable_cf_opts = cfd_->GetLatestMutableCFOptions();
+
+  for (int i = 0; i < storage_info_.num_levels(); i++) {
+    std::cout << "level " << i
+              << " [num files: " << storage_info_.NumLevelFiles(i) << "]"
+              << " --- fullness ("
+              << std::to_string(storage_info_.NumLevelBytes(i)) + "/" +
+                     std::to_string(storage_info_.MaxBytesForLevel(i))
+              << ")" << std::endl;
+
+    for (auto& fm : storage_info_.LevelFiles(i)) {
+      uint64_t num_entries = fm->num_entries;
+      if (num_entries == 0) {
+        std::shared_ptr<const TableProperties> tp;
+        Status s = cfd_->table_cache()->GetTableProperties(
+            file_options_, ro, cfd_->internal_comparator(), *fm, &tp,
+            mutable_cf_opts, false /*no io*/
+        );
+
+        assert(s.ok() && tp != nullptr);
+        num_entries = tp->num_entries;
+      }
+
+      std::cout << "\t\t[#" << fm->fd.GetNumber() << ":" << fm->fd.file_size
+                << " bytes (key:" << fm->smallest.user_key().ToString()
+                << " ... " << fm->largest.user_key().ToString()
+                << ") total:" << num_entries
+                << " | seq:" << fm->fd.smallest_seqno << " ... "
+                << fm->fd.largest_seqno << "]" << std::endl;
+    }
+  }
+
+  std::cout << "=============================================================\n"
+            << std::endl;
+  #endif  // PROFILE
+}
 
 Status Version::GetTableProperties(const ReadOptions& read_options,
                                    std::shared_ptr<const TableProperties>* tp,

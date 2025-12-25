@@ -1070,7 +1070,9 @@ class Version {
       const ReadOptions& read_options, MergeIteratorBuilder* merge_iter_builder,
       int level, bool allow_unprepared_value);
 
- private:
+  void PrintFullTreeSummary();
+
+  private:
   Env* env_;
   SystemClock* clock_;
 

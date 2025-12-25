@@ -293,6 +293,30 @@ void GetInternalTblPropCollFactory(
 
 class ColumnFamilySet;
 
+// struct RangeLease {
+//   Slice start;
+//   Slice end;
+
+//   RangeLease(const Slice& s, const Slice& e)
+//       : start(s.ToString()), end(e.ToString()) {}
+// };
+
+// class RangeLeaseManager {
+//  public:
+//   explicit RangeLeaseManager(const Comparator* ucmp) : user_comparator_(ucmp) {}
+
+//   // returns true if the lease is acquired
+//   bool AcquireLease(const Slice& start, const Slice& end);
+//   void ReleaseLease(const Slice& start, const Slice& end);
+//   // returns true if the range is currently leased
+//   bool IsRangeLeased(const Slice& start, const Slice& end);
+
+//  private:
+//   const Comparator* user_comparator_;
+//   std::mutex mutex_;
+//   std::vector<RangeLease> leases_;
+// };
+
 // This class keeps all the data that a column family needs.
 // Most methods require DB mutex held, unless otherwise noted
 class ColumnFamilyData {
@@ -605,6 +629,10 @@ class ColumnFamilyData {
     return ioptions_.cf_allow_ingest_behind || ioptions_.allow_ingest_behind;
   }
 
+  // RangeLeaseManager* GetRangeLeaseManager() {
+  //   return range_lease_manager_.get();
+  // }
+
  private:
   friend class ColumnFamilySet;
   ColumnFamilyData(
@@ -713,6 +741,9 @@ class ColumnFamilyData {
   bool mempurge_used_;
 
   std::atomic<uint64_t> next_epoch_number_;
+
+  // // RangeLeaseManager for managing range leases
+  // std::unique_ptr<RangeLeaseManager> range_lease_manager_;
 };
 
 // ColumnFamilySet has interesting thread-safety requirements
