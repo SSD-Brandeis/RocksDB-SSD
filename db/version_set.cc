@@ -1626,7 +1626,7 @@ void LevelIterator::InitFileIterator(size_t new_file_index) {
 void Version::PrintFullTreeSummary() {
 #ifdef PROFILE
   std::cout
-      << "\n====================== LSM-tree state =======================\n";
+      << "\n====================== FluidLSM-tree state =======================\n";
 
   const ReadOptions ro;
   const auto& ioptions = cfd_->ioptions();
@@ -4927,9 +4927,11 @@ void VersionStorageInfo::CalculateBaseBytes(const ImmutableOptions& ioptions,
     for (int i = 0; i < ioptions.num_levels; ++i) {
       if (i == 0 && ioptions.compaction_style == kCompactionStyleUniversal) {
         level_max_bytes_[i] = options.max_bytes_for_level_base;
+      } else if (i == 0 && ioptions.compaction_style == kCompactionStyleiLevel) {
+        level_max_bytes_[i] = options.max_bytes_for_level_base * options.fluidlsm_policy->GetSizeRatio(i);
       } else if (i >= 1) {
         double level_ratio = (compaction_style_ == kCompactionStyleiLevel)
-                                 ? options.fluidlsm_policy->GetSizeRatio(i - 1)
+                                 ? options.fluidlsm_policy->GetSizeRatio(i)
                                  : options.max_bytes_for_level_multiplier;
 
         level_max_bytes_[i] = MultiplyCheckOverflow(
@@ -7051,7 +7053,7 @@ uint64_t VersionSet::ApproximateSize(const SizeApproximationOptions& options,
 
   autovector<FdWithKeyRange*, 32> first_files;
   autovector<FdWithKeyRange*, 16> last_files;
-
+  int ilevel = v->cfd_->GetLatestMutableCFOptions().ilevel;
   // scan all the levels
   for (int level = start_level; level < end_level; ++level) {
     const LevelFilesBrief& files_brief = vstorage->LevelFilesBrief(level);
@@ -7069,8 +7071,50 @@ uint64_t VersionSet::ApproximateSize(const SizeApproximationOptions& options,
       }
       continue;
     }
+    if (level <= ilevel){
+      int tier_start = 0;
+      for (int tier = 0; tier < static_cast<int>(files_brief.num_tiers); tier++){
+        // identify the file position for start key
+        const int idx_start =
+            FindFileInRange(icmp, files_brief, start, tier_start,
+                            static_cast<uint32_t>(files_brief.tier_end_index[tier]));
+        assert(static_cast<size_t>(idx_start) < files_brief.num_files);
 
-    assert(level > 0);
+        // identify the file position for end key
+        int idx_end = idx_start;
+        if (icmp.Compare(files_brief.files[idx_end].largest_key, end) < 0) {
+          idx_end =
+              FindFileInRange(icmp, files_brief, end, idx_start,
+                              static_cast<uint32_t>(files_brief.tier_end_index[tier]));
+        }
+        assert(idx_end >= idx_start &&
+              static_cast<size_t>(idx_end) < files_brief.num_files);
+
+        // scan all files from the starting index to the ending index
+        // (inferred from the sorted order)
+
+        // first scan all the intermediate full files (excluding first and last)
+        for (int i = idx_start + 1; i < idx_end; ++i) {
+          uint64_t file_size = files_brief.files[i].fd.GetFileSize();
+          // The entire file falls into the range, so we can just take its size.
+          assert(file_size == ApproximateSize(read_options, v, files_brief.files[i],
+                                              start, end, caller));
+          total_full_size += file_size;
+        }
+
+        // save the first and the last files (which may be the same file), so we
+        // can scan them later.
+        first_files.push_back(&files_brief.files[idx_start]);
+        if (idx_start != idx_end) {
+          // we need to estimate size for both files, only if they are different
+          last_files.push_back(&files_brief.files[idx_end]);
+        }
+        tier_start = files_brief.tier_end_index[tier] + 1;
+      }
+      continue;
+    }
+
+    assert(level > ilevel);
     assert(files_brief.num_files > 0);
 
     // identify the file position for start key
