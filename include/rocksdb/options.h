@@ -63,6 +63,14 @@ struct DbPath;
 
 using FileTypeSet = SmallEnumSet<FileType, FileType::kBlobFile>;
 
+enum Verbosity {
+  NO_PRINTS = 0,
+  LOW = 1,
+  MEDIUM = 2,
+  HIGH = 3,
+  EXTREME = 4,
+};
+
 struct ColumnFamilyOptions : public AdvancedColumnFamilyOptions {
   // The function recovers options to a previous version. Only 4.6 or later
   // versions are supported.
