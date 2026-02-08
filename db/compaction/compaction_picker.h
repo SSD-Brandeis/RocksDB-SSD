@@ -65,7 +65,8 @@ class CompactionPicker {
       const MutableDBOptions& mutable_db_options,
       const std::vector<SequenceNumber>& existing_snapshots,
       const SnapshotChecker* snapshot_checker, VersionStorageInfo* vstorage,
-      LogBuffer* log_buffer) = 0;
+      LogBuffer* log_buffer,
+      uint64_t max_memtable_id = std::numeric_limits<uint64_t>::max()) = 0;
 
   // The returned Compaction might not include the whole requested range.
   // In that case, compaction_end will be set to the next key that needs
@@ -250,7 +251,7 @@ class CompactionPicker {
   std::set<Compaction*> level0_compactions_in_progress_;
 
   // FIXME (shubham): since we are tracking all the compaction in
-  // `leveli_compaction_in_progress_`, we can get rid of 
+  // `leveli_compaction_in_progress_`, we can get rid of
   // `compaction_in_progress` as it is doing the same
   std::vector<std::set<Compaction*>> leveli_compactions_in_progress_;
 
@@ -277,7 +278,8 @@ class NullCompactionPicker : public CompactionPicker {
       const MutableDBOptions& /*mutable_db_options*/,
       const std::vector<SequenceNumber>& /*existing_snapshots*/,
       const SnapshotChecker* /*snapshot_checker*/,
-      VersionStorageInfo* /*vstorage*/, LogBuffer* /* log_buffer */) override {
+      VersionStorageInfo* /*vstorage*/, LogBuffer* /* log_buffer */,
+      uint64_t /*max_memtable_id*/) override {
     return nullptr;
   }
 

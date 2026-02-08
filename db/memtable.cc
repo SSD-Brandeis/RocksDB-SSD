@@ -600,11 +600,25 @@ InternalIterator* MemTable::NewIterator(
     const ReadOptions& read_options,
     UnownedPtr<const SeqnoToTimeMapping> seqno_to_time_mapping, Arena* arena,
     const SliceTransform* prefix_extractor, bool /*for_flush*/) {
-  assert(arena != nullptr);
-  auto mem = arena->AllocateAligned(sizeof(MemTableIterator));
-  return new (mem)
-      MemTableIterator(MemTableIterator::kPointEntries, *this, read_options,
-                       seqno_to_time_mapping, arena, prefix_extractor);
+  // ------ To Support Pure Leveling ------
+  if (arena != nullptr) {
+    auto mem = arena->AllocateAligned(sizeof(MemTableIterator));
+    return new (mem)
+        MemTableIterator(MemTableIterator::kPointEntries, *this, read_options,
+                         seqno_to_time_mapping, arena, prefix_extractor);
+  } else {
+    return new MemTableIterator(MemTableIterator::kPointEntries, *this,
+                                read_options, seqno_to_time_mapping, arena,
+                                prefix_extractor);
+  }
+  // --------------------------------------
+  // {
+  //   assert(arena != nullptr);
+  //   auto mem = arena->AllocateAligned(sizeof(MemTableIterator));
+  //   return new (mem)
+  //       MemTableIterator(MemTableIterator::kPointEntries, *this,
+  //       read_options,
+  //                        seqno_to_time_mapping, arena, prefix_extractor);
 }
 
 // An iterator wrapper that wraps a MemTableIterator and logically strips each

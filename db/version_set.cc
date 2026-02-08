@@ -1625,8 +1625,8 @@ void LevelIterator::InitFileIterator(size_t new_file_index) {
 
 void Version::PrintFullTreeSummary() {
 #ifdef PROFILE
-  std::cout
-      << "\n====================== FluidLSM-tree state =======================\n";
+  std::cout << "\n====================== FluidLSM-tree state "
+               "=======================\n";
 
   const ReadOptions ro;
   const auto& ioptions = cfd_->ioptions();
@@ -4927,8 +4927,10 @@ void VersionStorageInfo::CalculateBaseBytes(const ImmutableOptions& ioptions,
     for (int i = 0; i < ioptions.num_levels; ++i) {
       if (i == 0 && ioptions.compaction_style == kCompactionStyleUniversal) {
         level_max_bytes_[i] = options.max_bytes_for_level_base;
-      } else if (i == 0 && ioptions.compaction_style == kCompactionStyleiLevel) {
-        level_max_bytes_[i] = options.max_bytes_for_level_base * options.fluidlsm_policy->GetSizeRatio(i);
+      } else if (i == 0 &&
+                 ioptions.compaction_style == kCompactionStyleiLevel) {
+        level_max_bytes_[i] = options.max_bytes_for_level_base *
+                              options.fluidlsm_policy->GetSizeRatio(i);
       } else if (i >= 1) {
         double level_ratio = (compaction_style_ == kCompactionStyleiLevel)
                                  ? options.fluidlsm_policy->GetSizeRatio(i)
@@ -7071,24 +7073,25 @@ uint64_t VersionSet::ApproximateSize(const SizeApproximationOptions& options,
       }
       continue;
     }
-    if (level <= ilevel){
+    if (level <= ilevel) {
       int tier_start = 0;
-      for (int tier = 0; tier < static_cast<int>(files_brief.num_tiers); tier++){
+      for (int tier = 0; tier < static_cast<int>(files_brief.num_tiers);
+           tier++) {
         // identify the file position for start key
-        const int idx_start =
-            FindFileInRange(icmp, files_brief, start, tier_start,
-                            static_cast<uint32_t>(files_brief.tier_end_index[tier]));
+        const int idx_start = FindFileInRange(
+            icmp, files_brief, start, tier_start,
+            static_cast<uint32_t>(files_brief.tier_end_index[tier]));
         assert(static_cast<size_t>(idx_start) < files_brief.num_files);
 
         // identify the file position for end key
         int idx_end = idx_start;
         if (icmp.Compare(files_brief.files[idx_end].largest_key, end) < 0) {
-          idx_end =
-              FindFileInRange(icmp, files_brief, end, idx_start,
-                              static_cast<uint32_t>(files_brief.tier_end_index[tier]));
+          idx_end = FindFileInRange(
+              icmp, files_brief, end, idx_start,
+              static_cast<uint32_t>(files_brief.tier_end_index[tier]));
         }
         assert(idx_end >= idx_start &&
-              static_cast<size_t>(idx_end) < files_brief.num_files);
+               static_cast<size_t>(idx_end) < files_brief.num_files);
 
         // scan all files from the starting index to the ending index
         // (inferred from the sorted order)
@@ -7097,8 +7100,9 @@ uint64_t VersionSet::ApproximateSize(const SizeApproximationOptions& options,
         for (int i = idx_start + 1; i < idx_end; ++i) {
           uint64_t file_size = files_brief.files[i].fd.GetFileSize();
           // The entire file falls into the range, so we can just take its size.
-          assert(file_size == ApproximateSize(read_options, v, files_brief.files[i],
-                                              start, end, caller));
+          assert(file_size == ApproximateSize(read_options, v,
+                                              files_brief.files[i], start, end,
+                                              caller));
           total_full_size += file_size;
         }
 
@@ -7367,12 +7371,34 @@ InternalIterator* VersionSet::MakeInputIterator(
     const std::optional<const Slice>& end) {
   auto cfd = c->column_family_data();
   int ilevel = cfd->GetLatestMutableCFOptions().ilevel;
+  const auto* ucmp = cfd->internal_comparator().user_comparator();
+  assert(ucmp);
+  const size_t ts_sz = ucmp->timestamp_size();
+  const bool logical_strip_timestamp =
+      ts_sz > 0 && !cfd->ioptions().persist_user_defined_timestamps;
+
+  size_t memtable_count = 0;
+  bool is_pure_leveling_enabled =
+      ilevel == -1 && cfd->GetLatestCFOptions().compaction_style ==
+                          CompactionStyle::kCompactionStyleiLevel;
+
+  if (is_pure_leveling_enabled) {
+    for (size_t i = 0; i < c->num_input_levels(); i++) {
+      memtable_count += c->mems(i).size();
+    }
+  }
+
+  // std::cout << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+  //           << " found mems:" << memtable_count << std::endl
+  //           << std::flush;
+
   // Level-0 files have to be merged together.  For other levels,
   // we will make a concatenating iterator per level.
   // TODO(opt): use concatenating iterator for level-0 if there is no overlap
   const size_t space = (c->level() <= ilevel ? c->input_levels(0)->num_files +
                                                    c->num_input_levels() - 1
-                                             : c->num_input_levels());
+                                             : c->num_input_levels()) +
+                       memtable_count;
   InternalIterator** list = new InternalIterator*[space];
   // First item in the pair is a pointer to range tombstones.
   // Second item is a pointer to a member of a LevelIterator,
@@ -7387,6 +7413,34 @@ InternalIterator* VersionSet::MakeInputIterator(
   for (size_t which = 0; which < c->num_input_levels(); which++) {
     const LevelFilesBrief* flevel = c->input_levels(which);
     num_input_files += flevel->num_files;
+
+    // ------ To Support Pure Leveling -----
+    for (auto* m : c->mems(which)) {
+      auto* iter = m->NewIterator(
+          read_options, /*seqno_to_time_mapping=*/nullptr, nullptr,
+          /*prefix_extractor=*/nullptr, /*for_flush=*/true);
+
+      list[num++] = iter;
+      std::unique_ptr<FragmentedRangeTombstoneIterator> range_del_iter(
+          logical_strip_timestamp
+              ? m->NewTimestampStrippingRangeTombstoneIterator(
+                    read_options, kMaxSequenceNumber, ts_sz)
+              : m->NewRangeTombstoneIterator(read_options, kMaxSequenceNumber,
+                                             true /* immutable_memtable */));
+      if (range_del_iter != nullptr) {
+        auto truncated_iter = std::make_unique<TruncatedRangeDelIterator>(
+            std::move(range_del_iter), &cfd->internal_comparator(),
+            static_cast<const InternalKey*>(nullptr),
+            static_cast<const InternalKey*>(nullptr));
+        range_tombstones.emplace_back(std::move(truncated_iter), nullptr);
+      } else {
+        std::unique_ptr<TruncatedRangeDelIterator> range_tombstone_iter =
+            nullptr;
+        range_tombstones.emplace_back(std::move(range_tombstone_iter), nullptr);
+      }
+    }
+    // ------------------------------------
+
     if (flevel->num_files != 0) {
       if (c->level(which) <= ilevel) {  // change later
         for (size_t i = 0; i < flevel->num_files; i++) {

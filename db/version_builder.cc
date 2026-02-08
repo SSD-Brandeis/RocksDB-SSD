@@ -573,74 +573,74 @@ class VersionBuilder::Rep {
       EpochNumberRequirement epoch_number_requirement =
           vstorage->GetEpochNumberRequirement();
       assert(icmp);
-      // Check L0
-      {
-        auto l0_checker = [this, epoch_number_requirement, icmp](
-                              const FileMetaData* lhs,
-                              const FileMetaData* rhs) {
-          assert(lhs);
-          assert(rhs);
+      // // Check L0
+      // {
+      //   auto l0_checker = [this, epoch_number_requirement, icmp](
+      //                         const FileMetaData* lhs,
+      //                         const FileMetaData* rhs) {
+      //     assert(lhs);
+      //     assert(rhs);
 
-          if (epoch_number_requirement ==
-              EpochNumberRequirement::kMightMissing) {
-            if (!level_zero_cmp_by_seqno_->operator()(lhs, rhs)) {
-              std::ostringstream oss;
-              oss << "L0 files are not sorted properly: files #"
-                  << lhs->fd.GetNumber() << " with seqnos (largest, smallest) "
-                  << lhs->fd.largest_seqno << " , " << lhs->fd.smallest_seqno
-                  << ", #" << rhs->fd.GetNumber()
-                  << " with seqnos (largest, smallest) "
-                  << rhs->fd.largest_seqno << " , " << rhs->fd.smallest_seqno;
-              return Status::Corruption("VersionBuilder", oss.str());
-            }
-          } else if (epoch_number_requirement ==
-                     EpochNumberRequirement::kMustPresent) {
-            if (lhs->epoch_number == rhs->epoch_number) {
-              bool range_overlapped =
-                  icmp->Compare(lhs->smallest, rhs->largest) <= 0 &&
-                  icmp->Compare(lhs->largest, rhs->smallest) >= 0;
+      //     if (epoch_number_requirement ==
+      //         EpochNumberRequirement::kMightMissing) {
+      //       if (!level_zero_cmp_by_seqno_->operator()(lhs, rhs)) {
+      //         std::ostringstream oss;
+      //         oss << "L0 files are not sorted properly: files #"
+      //             << lhs->fd.GetNumber() << " with seqnos (largest, smallest) "
+      //             << lhs->fd.largest_seqno << " , " << lhs->fd.smallest_seqno
+      //             << ", #" << rhs->fd.GetNumber()
+      //             << " with seqnos (largest, smallest) "
+      //             << rhs->fd.largest_seqno << " , " << rhs->fd.smallest_seqno;
+      //         return Status::Corruption("VersionBuilder", oss.str());
+      //       }
+      //     } else if (epoch_number_requirement ==
+      //                EpochNumberRequirement::kMustPresent) {
+      //       if (lhs->epoch_number == rhs->epoch_number) {
+      //         bool range_overlapped =
+      //             icmp->Compare(lhs->smallest, rhs->largest) <= 0 &&
+      //             icmp->Compare(lhs->largest, rhs->smallest) >= 0;
 
-              if (range_overlapped) {
-                std::ostringstream oss;
-                oss << "L0 files of same epoch number but overlapping range #"
-                    << lhs->fd.GetNumber()
-                    << " , smallest key: " << lhs->smallest.DebugString(true)
-                    << " , largest key: " << lhs->largest.DebugString(true)
-                    << " , epoch number: " << lhs->epoch_number << " vs. file #"
-                    << rhs->fd.GetNumber()
-                    << " , smallest key: " << rhs->smallest.DebugString(true)
-                    << " , largest key: " << rhs->largest.DebugString(true)
-                    << " , epoch number: " << rhs->epoch_number;
-                return Status::Corruption("VersionBuilder", oss.str());
-              }
-            }
+      //         if (range_overlapped) {
+      //           std::ostringstream oss;
+      //           oss << "L0 files of same epoch number but overlapping range #"
+      //               << lhs->fd.GetNumber()
+      //               << " , smallest key: " << lhs->smallest.DebugString(true)
+      //               << " , largest key: " << lhs->largest.DebugString(true)
+      //               << " , epoch number: " << lhs->epoch_number << " vs. file #"
+      //               << rhs->fd.GetNumber()
+      //               << " , smallest key: " << rhs->smallest.DebugString(true)
+      //               << " , largest key: " << rhs->largest.DebugString(true)
+      //               << " , epoch number: " << rhs->epoch_number;
+      //           return Status::Corruption("VersionBuilder", oss.str());
+      //         }
+      //       }
 
-            if (!level_zero_cmp_by_epochno_->operator()(lhs, rhs)) {
-              std::ostringstream oss;
-              oss << "L0 files are not sorted properly: files #"
-                  << lhs->fd.GetNumber() << " with epoch number "
-                  << lhs->epoch_number << ", #" << rhs->fd.GetNumber()
-                  << " with epoch number " << rhs->epoch_number;
-              return Status::Corruption("VersionBuilder", oss.str());
-            }
-          }
+      //       if (!level_zero_cmp_by_epochno_->operator()(lhs, rhs)) {
+      //         std::ostringstream oss;
+      //         oss << "L0 files are not sorted properly: files #"
+      //             << lhs->fd.GetNumber() << " with epoch number "
+      //             << lhs->epoch_number << ", #" << rhs->fd.GetNumber()
+      //             << " with epoch number " << rhs->epoch_number;
+      //         return Status::Corruption("VersionBuilder", oss.str());
+      //       }
+      //     }
 
-          return Status::OK();
-        };
+      //     return Status::OK();
+      //   };
 
-        const Status s = CheckConsistencyDetailsForLevel(
-            vstorage, /* level */ 0, l0_checker,
-            "VersionBuilder::CheckConsistency0", &expected_linked_ssts);
-        if (!s.ok()) {
-          return s;
-        }
-      }
+      //   const Status s = CheckConsistencyDetailsForLevel(
+      //       vstorage, /* level */ 0, l0_checker,
+      //       "VersionBuilder::CheckConsistency0", &expected_linked_ssts);
+      //   if (!s.ok()) {
+      //     return s;
+      //   }
+      // }
 
-      // Check L1 -> iLevel
+      // Check L0 -> iLevel
       const int ilevel = cfd_->GetLatestMutableCFOptions().ilevel;
 
       {
-        for (int level = 1; level <= ilevel; ++level) {
+        for (int level = 0; level <= ilevel; ++level) {
           auto checker = [this, level, icmp](const SortedRun& lhs,
                                              const SortedRun& rhs) {
             assert(!lhs.empty());

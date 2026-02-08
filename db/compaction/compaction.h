@@ -69,6 +69,7 @@ struct CompactionInputFiles {
   // num files/runs allowed to be compacted in single compaction
   int allowed;
   std::vector<FileMetaData*> files;
+  std::vector<ReadOnlyMemTable*> mems;
   std::vector<AtomicCompactionUnitBoundary> atomic_compaction_unit_boundaries;
   inline bool empty() const { return files.empty(); }
   inline size_t size() const { return files.size(); }
@@ -125,6 +126,12 @@ class Compaction {
     return inputs_[compaction_input_level].level;
   }
 
+  bool is_pure_leveling() const {
+    return (mutable_cf_options_.ilevel == -1 &&
+            cfd_->GetLatestCFOptions().compaction_style ==
+                CompactionStyle::kCompactionStyleiLevel);
+  }
+
   int start_level() const { return start_level_; }
 
   // Outputs will go to this level
@@ -161,6 +168,13 @@ class Compaction {
   FileMetaData* input(size_t compaction_input_level, size_t i) const {
     assert(compaction_input_level < inputs_.size());
     return inputs_[compaction_input_level][i];
+  }
+
+  // Return the vector of memtables that participate in this compaction
+  // size of which should be less than inputs_.size()
+  const std::vector<ReadOnlyMemTable*>& mems(size_t which) const {
+    assert(which < inputs_.size());
+    return inputs_[which].mems;
   }
 
   const std::vector<AtomicCompactionUnitBoundary>* boundaries(
@@ -502,13 +516,14 @@ class Compaction {
   // plumb down appropriate key boundaries to RangeDelAggregator during
   // compaction.
   static std::vector<CompactionInputFiles> PopulateWithAtomicBoundaries(
-      VersionStorageInfo* vstorage, std::vector<CompactionInputFiles> inputs);
+      VersionStorageInfo* vstorage, std::vector<CompactionInputFiles> inputs,
+      int ilevel);
 
   // helper function to determine if compaction with inputs and storage is
   // bottommost
-  static bool IsBottommostLevel(
-      int output_level, VersionStorageInfo* vstorage,
-      const std::vector<CompactionInputFiles>& inputs, int ilevel = 0);
+  static bool IsBottommostLevel(int output_level, VersionStorageInfo* vstorage,
+                                const std::vector<CompactionInputFiles>& inputs,
+                                int ilevel = 0);
 
   static bool IsFullCompaction(VersionStorageInfo* vstorage,
                                const std::vector<CompactionInputFiles>& inputs);

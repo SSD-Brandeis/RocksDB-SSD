@@ -420,7 +420,8 @@ class ColumnFamilyData {
       const MutableCFOptions& mutable_options,
       const MutableDBOptions& mutable_db_options,
       const std::vector<SequenceNumber>& existing_snapshots,
-      const SnapshotChecker* snapshot_checker, LogBuffer* log_buffer);
+      const SnapshotChecker* snapshot_checker, LogBuffer* log_buffer,
+      uint64_t max_memtable_id = std::numeric_limits<uint64_t>::max());
 
   // Check if the passed range overlap with any running compactions.
   // REQUIRES: DB mutex held

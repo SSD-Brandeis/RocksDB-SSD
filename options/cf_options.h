@@ -175,6 +175,7 @@ struct MutableCFOptions {
             options.bottommost_file_compaction_delay),
         uncache_aggressiveness(options.uncache_aggressiveness),
         ilevel(options.ilevel),
+        is_pure_leveling(options.is_pure_leveling),
         dynamic_file_size(options.dynamic_file_size),
         level_compaction_granularity(options.level_compaction_granularity),
         fluidlsm_policy(options.fluidlsm_policy) {
@@ -344,6 +345,7 @@ struct MutableCFOptions {
   uint32_t uncache_aggressiveness;
 
   int ilevel;
+  bool is_pure_leveling;
   bool dynamic_file_size;
 
   std::shared_ptr<const CompactionRunPolicy> level_compaction_granularity;

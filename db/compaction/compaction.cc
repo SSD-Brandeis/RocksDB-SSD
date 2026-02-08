@@ -152,10 +152,11 @@ void Compaction::GetBoundaryInternalKeys(
 }
 
 std::vector<CompactionInputFiles> Compaction::PopulateWithAtomicBoundaries(
-    VersionStorageInfo* vstorage, std::vector<CompactionInputFiles> inputs) {
+    VersionStorageInfo* vstorage, std::vector<CompactionInputFiles> inputs,
+    int ilevel) {
   const Comparator* ucmp = vstorage->InternalComparator()->user_comparator();
   for (size_t i = 0; i < inputs.size(); i++) {
-    if (inputs[i].level == 0 || inputs[i].files.empty()) {
+    if (inputs[i].level <= ilevel || inputs[i].files.empty()) {
       continue;
     }
     inputs[i].atomic_compaction_unit_boundaries.reserve(inputs[i].files.size());
@@ -306,7 +307,8 @@ Compaction::Compaction(
       output_temperature_(_output_temperature),
       deletion_compaction_(_deletion_compaction),
       l0_files_might_overlap_(l0_files_might_overlap),
-      inputs_(PopulateWithAtomicBoundaries(vstorage, std::move(_inputs))),
+      inputs_(PopulateWithAtomicBoundaries(vstorage, std::move(_inputs),
+                                           mutable_cf_options_.ilevel)),
       grandparents_(std::move(_grandparents)),
       earliest_snapshot_(_earliest_snapshot),
       snapshot_checker_(_snapshot_checker),
@@ -319,7 +321,8 @@ Compaction::Compaction(
           (_compaction_reason == CompactionReason::kExternalSstIngestion ||
            _compaction_reason == CompactionReason::kRefitLevel)
               ? false
-              : IsBottommostLevel(output_level_, vstorage, inputs_, mutable_cf_options_.ilevel)),
+              : IsBottommostLevel(output_level_, vstorage, inputs_,
+                                  mutable_cf_options_.ilevel)),
       is_full_compaction_(IsFullCompaction(vstorage, inputs_)),
       is_manual_compaction_(_manual_compaction),
       trim_ts_(_trim_ts),
@@ -384,7 +387,8 @@ Compaction::Compaction(
     }
   }
 
-  GetBoundaryKeys(vstorage, inputs_, &smallest_user_key_, &largest_user_key_, -1, mutable_cf_options_.ilevel);
+  GetBoundaryKeys(vstorage, inputs_, &smallest_user_key_, &largest_user_key_,
+                  -1, mutable_cf_options_.ilevel);
 
   // Every compaction regardless of any compaction reason may respect the
   // existing compact cursor in the output level to split output files
@@ -452,9 +456,9 @@ void Compaction::PopulatePenultimateLevelOutputRange() {
   //  penultimate level, and penultimate level input is empty,
   //  this call will not set penultimate_level_smallest_ or
   //  penultimate_level_largest_. No keys will be compacted up.
-  GetBoundaryInternalKeys(input_vstorage_, inputs_,
-                          &penultimate_level_smallest_,
-                          &penultimate_level_largest_, exclude_level, mutable_cf_options_.ilevel);
+  GetBoundaryInternalKeys(
+      input_vstorage_, inputs_, &penultimate_level_smallest_,
+      &penultimate_level_largest_, exclude_level, mutable_cf_options_.ilevel);
 
   if (penultimate_output_range_type_ !=
       PenultimateOutputRangeType::kFullRange) {
@@ -583,10 +587,10 @@ bool Compaction::IsTrivialMove() const {
               [&](const FileMetaData* a, const FileMetaData* b) {
                 return icmp->Compare(a->smallest, b->smallest) < 0;
               });
-    
+
     // check for overlapping key ranges
     for (size_t i = 1; i < sorted_files.size(); ++i) {
-      const FileMetaData* prev = sorted_files[i-1];
+      const FileMetaData* prev = sorted_files[i - 1];
       const FileMetaData* curr = sorted_files[i];
       if (icmp->Compare(prev->largest, curr->smallest) >= 0) {
         return false;

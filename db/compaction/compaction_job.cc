@@ -928,6 +928,33 @@ Status CompactionJob::Install(bool* compaction_released) {
     io_status_ = versions_->io_status();
   }
 
+  // ------ To Support Pure Leveling ------
+  auto compaction = compact_->compaction;
+  autovector<ReadOnlyMemTable*> mems_to_retire;
+  uint64_t proxy_file_number = 1;
+
+  for (int input_lvl = 0;
+       input_lvl < static_cast<int>(compaction->num_input_levels());
+       ++input_lvl) {
+    auto mems = compaction->mems(input_lvl);
+    for (auto mem : mems) {
+      mem->SetFlushCompleted(true);
+      mem->SetFileNumber(proxy_file_number);
+      mems_to_retire.push_back(mem);
+    }
+  }
+
+  if (!mems_to_retire.empty() && status.ok()) {
+    // We use write_edits = false because InstallCompactionResults()
+    // already called LogAndApply for the VersionEdit.
+    cfd->imm()->TryInstallMemtableFlushResults(
+        cfd, mems_to_retire, nullptr, versions_, db_mutex_, proxy_file_number,
+        &job_context_->memtables_to_free, db_directory_, log_buffer_, nullptr,
+        false /* write_edits */
+    );
+  }
+  // --------------------------------------
+
   VersionStorageInfo::LevelSummaryStorage tmp;
   auto vstorage = cfd->current()->storage_info();
   const auto& stats = compaction_stats_.stats;
@@ -2110,6 +2137,19 @@ bool CompactionJob::UpdateCompactionStats(uint64_t* num_input_range_del) {
        input_level < static_cast<int>(compaction->num_input_levels());
        ++input_level) {
     const LevelFilesBrief* flevel = compaction->input_levels(input_level);
+
+    // ---- To Support Pure Leveling -----
+    auto mems = compaction->mems(input_level);
+    for (auto mem : mems) {
+      uint64_t mem_input_entries = mem->NumEntries();
+      uint64_t mem_num_range_del = mem->NumRangeDeletion();
+      compaction_stats_.stats.num_input_records += mem_input_entries;
+      if (num_input_range_del) {
+        *num_input_range_del += mem_num_range_del;
+      }
+    }
+    // -----------------------------------
+
     size_t num_input_files = flevel->num_files;
     uint64_t* bytes_read;
     if (compaction->level(input_level) != compaction->output_level()) {

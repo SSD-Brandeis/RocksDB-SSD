@@ -55,7 +55,8 @@ class ILevelCompactionBuilder {
                           LogBuffer* log_buffer,
                           const MutableCFOptions& mutable_cf_options,
                           const ImmutableOptions& ioptions,
-                          const MutableDBOptions& mutable_db_options)
+                          const MutableDBOptions& mutable_db_options,
+                          ColumnFamilyData* cfd, uint64_t max_memtable_id)
       : cf_name_(cf_name),
         vstorage_(vstorage),
         compaction_picker_(compaction_picker),
@@ -64,7 +65,11 @@ class ILevelCompactionBuilder {
         ioptions_(ioptions),
         mutable_db_options_(mutable_db_options),
         ilevel_(mutable_cf_options.ilevel),
-        level_compaction_granularity_(mutable_cf_options.level_compaction_granularity) {}
+        cfd_(cfd),
+        max_memtable_id_(max_memtable_id),
+        is_pure_leveling_(mutable_cf_options.is_pure_leveling),
+        level_compaction_granularity_(
+            mutable_cf_options.level_compaction_granularity) {}
 
   // Pick and return a compaction.
   Compaction* PickCompaction();
@@ -125,15 +130,6 @@ class ILevelCompactionBuilder {
   bool TryExtendNoniLTrivialMove(int start_index,
                                  bool only_expand_right = false);
 
-  // // Picks a file from level_files to compact.
-  // // level_files is a vector of (level, file metadata) in ascending order of
-  // // level. If compact_to_next_level is true, compact the file to the next
-  // // level, otherwise, compact to the same level as the input file.
-  // // If skip_last_level is true, skip the last level.
-  // void PickRunsToCompact(
-  //     const autovector<std::pair<int, FileMetaData*>>& level_files,
-  //     CompactToNextLevel compact_to_next_level);
-
   const std::string& cf_name_;
   VersionStorageInfo* vstorage_;
   CompactionPicker* compaction_picker_;
@@ -161,6 +157,15 @@ class ILevelCompactionBuilder {
 
   // static const int kMinFilesForIntraL0Compaction = 4;
   int ilevel_ = 0;
+
+  // column family data is required to support pure leveling
+  ColumnFamilyData* cfd_;
+  uint64_t max_memtable_id_;
+  bool is_pure_leveling_;
+
+  // Memtable to be compacted by this compaction
+  // Ordered by increasing memtable id, i.e., oldest memtable first.
+  autovector<ReadOnlyMemTable*> mems_;
 
   // Compaction run picker, which decides how many tiers/files a
   // single compaction can pick from a specific level
@@ -329,7 +334,8 @@ bool ILevelCompactionBuilder::PickRunsToCompact() {
     // if `start_level_` < ilevel, pick all the files.
     const std::vector<SortedRun>& level_runs =
         vstorage_->LevelRuns(start_level_);
-    int num_runs = level_compaction_granularity_->PickCompactionCount(start_level_);
+    int num_runs =
+        level_compaction_granularity_->PickCompactionCount(start_level_);
     for (int index = static_cast<int>(level_runs.size()) - 1;
          index >= 0 && num_runs > 0; index--) {
       SortedRun run = level_runs[index];
@@ -366,7 +372,8 @@ bool ILevelCompactionBuilder::PickRunsToCompact() {
       start_level_inputs_.files.push_back(f);
       if (start_level_ > ilevel_ &&
           static_cast<int>(start_level_inputs_.size()) <
-              level_compaction_granularity_->PickCompactionCount(start_level_) &&
+              level_compaction_granularity_->PickCompactionCount(
+                  start_level_) &&
           (!compaction_picker_->ExpandInputsToCleanCut(cf_name_, vstorage_,
                                                        &start_level_inputs_) ||
            compaction_picker_->FilesRangeOverlapWithCompaction(
@@ -430,6 +437,60 @@ bool ILevelCompactionBuilder::PickRunsToCompact() {
 }
 
 void ILevelCompactionBuilder::SetupInitialFiles() {
+  if (is_pure_leveling_) {
+    // Check if we have any pending immutable memtable to flush
+    uint64_t max_next_log_number = 0;
+    cfd_->imm()->PickMemtablesToFlush(max_memtable_id_, &mems_,
+                                      &max_next_log_number);
+
+    if (!mems_.empty()) {
+      ReadOptions ro;
+      ro.total_order_seek = true;
+      ro.io_activity = Env::IOActivity::kFlush;
+      Arena arena;
+      bool first_key = true;
+
+      // compact immutable mems with Level 0
+      start_level_ = 0;
+      output_level_ = 0;
+      start_level_inputs_.clear();
+      start_level_inputs_.level = 0;
+      output_level_inputs_.clear();
+      output_level_inputs_.level = 0;
+
+      InternalKey smallest, largest;
+      for (auto* m : mems_) {
+        auto* iter =
+            m->NewIterator(ro, /*seqno_to_time_mapping=*/nullptr, &arena,
+                           /*prefix_extractor=*/nullptr, /*for_flush=*/false);
+        start_level_inputs_.mems.push_back(m);
+
+        // FIXME: (shubham) This way of seeking is not correct when we
+        // have range deletes in a workload and it might corrupt database
+        iter->SeekToFirst();
+        if (!iter->Valid()) continue;
+        InternalKey start, end;
+        start.DecodeFrom(iter->key());
+        iter->SeekToLast();
+        end.DecodeFrom(iter->key());
+
+        if (first_key) {
+          smallest = start;
+          largest = end;
+          first_key = false;
+        } else {
+          if (cfd_->internal_comparator().Compare(start, smallest) < 0)
+            smallest = start;
+          if (cfd_->internal_comparator().Compare(end, largest) > 0)
+            largest = end;
+        }
+      }
+      // std::vector<FileMetaData*> overlapping_files_at_l0_;
+      cfd_->current()->storage_info()->GetOverlappingInputs(
+          0, &smallest, &largest, &start_level_inputs_.files);
+      return;
+    }
+  }
   // Find the compactions by:
   //    1) number of files for levels between 0 and ilevel
   //    2) level size for levels > ilevel.
@@ -441,6 +502,7 @@ void ILevelCompactionBuilder::SetupInitialFiles() {
     if (start_level_score_ >= 1) {
       output_level_ =
           (start_level_ == 0) ? vstorage_->base_level() : start_level_ + 1;
+      if (output_level_ < 0) output_level_ = start_level_ + 1;
       bool picked_file_to_compact = PickRunsToCompact();
       TEST_SYNC_POINT_CALLBACK("PostPickFileToCompact",
                                &picked_file_to_compact);
@@ -651,7 +713,6 @@ Compaction* ILevelCompactionBuilder::GetCompaction() {
   // does not overlap with other LIs. This happens when
   // compaction_inputs_[0].size() == 1 since SetupOtherLiFilesIfNeeded() did not
   // pull in more LIs.
-  // TODO (steven): need to rewrite the above comment base on our function
   assert(!compaction_inputs_.empty());
   bool ilevel_files_might_overlap =
       start_level_ <= ilevel_ && !is_ilevel_trivial_move_ &&
@@ -721,10 +782,10 @@ Compaction* ILevelCompactionPicker::PickCompaction(
     const MutableDBOptions& mutable_db_options,
     const std::vector<SequenceNumber>& /*existing_snapshots */,
     const SnapshotChecker* /*snapshot_checker*/, VersionStorageInfo* vstorage,
-    LogBuffer* log_buffer) {
+    LogBuffer* log_buffer, uint64_t max_memtable_id) {
   ILevelCompactionBuilder builder(cf_name, vstorage, this, log_buffer,
                                   mutable_cf_options, ioptions_,
-                                  mutable_db_options);
+                                  mutable_db_options, cfd_, max_memtable_id);
   return builder.PickCompaction();
 }
 

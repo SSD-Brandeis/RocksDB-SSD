@@ -1101,6 +1101,7 @@ struct AdvancedColumnFamilyOptions {
 
   // Tree will follow tiered layout up until level i
   int ilevel = 0;
+  bool is_pure_leveling = false;
   bool dynamic_file_size;
 
   // Compaction run policy defined the number of tiers/files

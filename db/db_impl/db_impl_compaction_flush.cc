@@ -3033,6 +3033,66 @@ ColumnFamilyData* DBImpl::PickCompactionFromQueue(
   return cfd;
 }
 
+// -------- To Support Pure Leveling --------
+bool DBImpl::NeedCompactionInsteadOfFlush(ColumnFamilyData* cfd) {
+  // Pure leveling needs to know the existing files in Level 1
+  mutex_.AssertHeld();
+  auto base_ = cfd->current();
+  if (base_->storage_info()->NumLevelFiles(0) == 0) {
+    return false;
+  }
+  InternalKey smallest, largest;
+  ReadOptions ro;
+  ro.total_order_seek = true;
+  ro.io_activity = Env::IOActivity::kFlush;
+  Arena arena;
+
+  bool first_key = true;
+  uint64_t max_next_log_number = 0;
+
+  const bool needs_to_sync_closed_wals =
+      logfile_number_ > 0 &&
+      (versions_->GetColumnFamilySet()->NumberOfColumnFamilies() > 1 ||
+       allow_2pc());
+
+  uint64_t max_memtable_id =
+      needs_to_sync_closed_wals
+          ? cfd->imm()->GetLatestMemTableID(false /*for_atomic_flush*/)
+          : std::numeric_limits<uint64_t>::max();
+
+  autovector<ReadOnlyMemTable*> mems;
+  cfd->imm()->PickMemtablesToFlush(max_memtable_id, &mems,
+                                   &max_next_log_number, false);
+  for (ReadOnlyMemTable* m : mems) {
+    auto* iter =
+        m->NewIterator(ro, /*seqno_to_time_mapping=*/nullptr, &arena,
+                       /*prefix_extractor=*/nullptr, /*for_flush=*/true);
+    iter->SeekToFirst();
+    if (!iter->Valid()) continue;
+    InternalKey start, end;
+    start.DecodeFrom(iter->key());
+    iter->SeekToLast();
+    end.DecodeFrom(iter->key());
+
+    if (first_key) {
+      smallest = start;
+      largest = end;
+      first_key = false;
+    } else {
+      if (cfd->internal_comparator().Compare(start, smallest) < 0)
+        smallest = start;
+      if (cfd->internal_comparator().Compare(end, largest) > 0) largest = end;
+    }
+  }
+
+  std::vector<FileMetaData*> overlapping_files_at_l0_;
+  base_->storage_info()->GetOverlappingInputs(0, &smallest, &largest,
+                                              &overlapping_files_at_l0_);
+  if (overlapping_files_at_l0_.empty()) return false;
+  return true;
+}
+// ----------------------------------
+
 bool DBImpl::EnqueuePendingFlush(const FlushRequest& flush_req) {
   mutex_.AssertHeld();
   bool enqueued = false;
@@ -3050,12 +3110,21 @@ bool DBImpl::EnqueuePendingFlush(const FlushRequest& flush_req) {
         flush_req.cfd_to_max_mem_id_to_persist.begin()->first;
     assert(cfd);
 
-    if (!cfd->queued_for_flush() && cfd->imm()->IsFlushPending()) {
+    if (cfd->GetLatestCFOptions().is_pure_leveling &&
+        NeedCompactionInsteadOfFlush(cfd)) {
+      assert(!cfd->queued_for_compaction());
       cfd->Ref();
-      cfd->set_queued_for_flush(true);
-      ++unscheduled_flushes_;
-      flush_queue_.push_back(flush_req);
-      enqueued = true;
+      compaction_queue_.push_back(cfd);
+      cfd->set_queued_for_compaction(true);
+      ++unscheduled_compactions_;
+    } else {
+      if (!cfd->queued_for_flush() && cfd->imm()->IsFlushPending()) {
+        cfd->Ref();
+        cfd->set_queued_for_flush(true);
+        ++unscheduled_flushes_;
+        flush_queue_.push_back(flush_req);
+        enqueued = true;
+      }
     }
   } else {
     for (auto& iter : flush_req.cfd_to_max_mem_id_to_persist) {
@@ -3709,8 +3778,22 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
                            &snapshot_checker);
         assert(is_snapshot_supported_ || snapshots_.empty());
       }
+
+      // We need to find max_memtable_id to pick correct memtables 
+      // if this compaction is from Memtable to Level 0; only useful
+      // when pure leveling is enabled
+      const bool needs_to_sync_closed_wals =
+          logfile_number_ > 0 &&
+          (versions_->GetColumnFamilySet()->NumberOfColumnFamilies() > 1 ||
+           allow_2pc());
+
+      uint64_t max_memtable_id =
+          needs_to_sync_closed_wals
+              ? cfd->imm()->GetLatestMemTableID(false /*for_atomic_flush*/)
+              : std::numeric_limits<uint64_t>::max();
       c.reset(cfd->PickCompaction(mutable_cf_options, mutable_db_options_,
-                                  snapshot_seqs, snapshot_checker, log_buffer));
+                                  snapshot_seqs, snapshot_checker, log_buffer,
+                                  max_memtable_id));
       TEST_SYNC_POINT("DBImpl::BackgroundCompaction():AfterPickCompaction");
 
       if (c != nullptr) {

@@ -2360,6 +2360,10 @@ class DBImpl : public DB {
   void TrackOrUntrackFiles(const std::vector<std::string>& existing_data_files,
                            bool track);
 
+  // ----- To Support Pure Leveling ----
+  bool NeedCompactionInsteadOfFlush(ColumnFamilyData* cfd);
+  // -----------------------------------
+
   void MaybeScheduleFlushOrCompaction();
 
   struct FlushRequest {

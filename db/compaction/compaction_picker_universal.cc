@@ -433,7 +433,7 @@ Compaction* UniversalCompactionPicker::PickCompaction(
     const MutableDBOptions& mutable_db_options,
     const std::vector<SequenceNumber>& existing_snapshots,
     const SnapshotChecker* snapshot_checker, VersionStorageInfo* vstorage,
-    LogBuffer* log_buffer) {
+    LogBuffer* log_buffer, uint64_t /*max_memtable_id*/) {
   UniversalCompactionBuilder builder(
       ioptions_, icmp_, cf_name, mutable_cf_options, mutable_db_options,
       existing_snapshots, snapshot_checker, vstorage, this, log_buffer);

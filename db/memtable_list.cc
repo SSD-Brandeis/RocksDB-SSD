@@ -404,7 +404,7 @@ bool MemTableList::IsFlushPendingOrRunning() const {
 // Returns the memtables that need to be flushed.
 void MemTableList::PickMemtablesToFlush(uint64_t max_memtable_id,
                                         autovector<ReadOnlyMemTable*>* ret,
-                                        uint64_t* max_next_log_number) {
+                                        uint64_t* max_next_log_number, bool is_picking) {
   AutoThreadOperationStageUpdater stage_updater(
       ThreadStatus::STAGE_PICK_MEMTABLES_TO_FLUSH);
   const auto& memlist = current_->memlist_;
@@ -427,14 +427,16 @@ void MemTableList::PickMemtablesToFlush(uint64_t max_memtable_id,
     }
     if (!m->flush_in_progress_) {
       assert(!m->flush_completed_);
-      num_flush_not_started_--;
-      if (num_flush_not_started_ == 0) {
-        imm_flush_needed.store(false, std::memory_order_release);
-      }
-      m->flush_in_progress_ = true;  // flushing will start very soon
-      if (max_next_log_number) {
-        *max_next_log_number =
-            std::max(m->GetNextLogNumber(), *max_next_log_number);
+      if (is_picking) {
+        num_flush_not_started_--;
+        if (num_flush_not_started_ == 0) {
+          imm_flush_needed.store(false, std::memory_order_release);
+        }
+        m->flush_in_progress_ = true;  // flushing will start very soon
+        if (max_next_log_number) {
+          *max_next_log_number =
+          std::max(m->GetNextLogNumber(), *max_next_log_number);
+        }
       }
       ret->push_back(m);
     } else if (!ret->empty()) {

@@ -604,7 +604,7 @@ ColumnFamilyData::ColumnFamilyData(
           new LevelCompactionPicker(ioptions_, &internal_comparator_));
     } else if (ioptions_.compaction_style == kCompactionStyleiLevel) {
       compaction_picker_.reset(
-          new ILevelCompactionPicker(ioptions_, &internal_comparator_));
+          new ILevelCompactionPicker(ioptions_, &internal_comparator_, this));
     } else if (ioptions_.compaction_style == kCompactionStyleUniversal) {
       compaction_picker_.reset(
           new UniversalCompactionPicker(ioptions_, &internal_comparator_));
@@ -931,6 +931,7 @@ ColumnFamilyData::GetWriteStallConditionAndCause(
   if (num_unflushed_memtables >= mutable_cf_options.max_write_buffer_number) {
     return {WriteStallCondition::kStopped, WriteStallCause::kMemtableLimit};
   } else if (!mutable_cf_options.disable_auto_compactions &&
+             !mutable_cf_options.is_pure_leveling &&
              num_l0_files >= mutable_cf_options.level0_stop_writes_trigger) {
     return {WriteStallCondition::kStopped, WriteStallCause::kL0FileCountLimit};
   } else if (!mutable_cf_options.disable_auto_compactions &&
@@ -946,6 +947,7 @@ ColumnFamilyData::GetWriteStallConditionAndCause(
                  immutable_cf_options.min_write_buffer_number_to_merge) {
     return {WriteStallCondition::kDelayed, WriteStallCause::kMemtableLimit};
   } else if (!mutable_cf_options.disable_auto_compactions &&
+             !mutable_cf_options.is_pure_leveling &&
              mutable_cf_options.level0_slowdown_writes_trigger >= 0 &&
              num_l0_files >=
                  mutable_cf_options.level0_slowdown_writes_trigger) {
@@ -1183,10 +1185,11 @@ Compaction* ColumnFamilyData::PickCompaction(
     const MutableCFOptions& mutable_options,
     const MutableDBOptions& mutable_db_options,
     const std::vector<SequenceNumber>& existing_snapshots,
-    const SnapshotChecker* snapshot_checker, LogBuffer* log_buffer) {
+    const SnapshotChecker* snapshot_checker, LogBuffer* log_buffer,
+    uint64_t max_memtable_id) {
   auto* result = compaction_picker_->PickCompaction(
       GetName(), mutable_options, mutable_db_options, existing_snapshots,
-      snapshot_checker, current_->storage_info(), log_buffer);
+      snapshot_checker, current_->storage_info(), log_buffer, max_memtable_id);
   if (result != nullptr) {
     result->FinalizeInputInfo(current_);
   }

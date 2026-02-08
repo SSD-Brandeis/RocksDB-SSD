@@ -270,8 +270,8 @@ bool CompactionOutputs::ShouldStopBefore(const CompactionIterator& c_iter) {
     return true;
   }
 
-  // files output to Level 0 won't be split
-  if (compaction_->output_level() == 0) {
+  // files output to Level 0 won't be split unless pure_leveling is enabled
+  if (!compaction_->is_pure_leveling() && compaction_->output_level() == 0) {
     return false;
   }
 
