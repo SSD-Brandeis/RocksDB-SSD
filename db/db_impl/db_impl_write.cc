@@ -461,6 +461,7 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
   //                 __prewrite_end2 - __writeimpl_start).count()
   //           << "," << std::flush;
   // #endif
+  StopWatch write_sw(immutable_db_options_.clock, stats_, DB_WRITE);
 
   if (write_options.low_pri) {
     Status s = ThrottleLowPriWritesIfNeeded(write_options, my_batch);
@@ -531,7 +532,7 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
   //                 __prewrite_end - __prewrite_end1).count()
   //           << "," << std::flush;
   // #endif
-  StopWatch write_sw(immutable_db_options_.clock, stats_, DB_WRITE);
+  // StopWatch write_sw(immutable_db_options_.clock, stats_, DB_WRITE);
 
   write_thread_.JoinBatchGroup(&w);
   // #ifdef TIMER
