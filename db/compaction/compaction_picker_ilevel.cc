@@ -56,6 +56,7 @@ class ILevelCompactionBuilder {
                           const MutableCFOptions& mutable_cf_options,
                           const ImmutableOptions& ioptions,
                           const MutableDBOptions& mutable_db_options,
+                          const std::string& full_history_ts_low,
                           ColumnFamilyData* cfd, uint64_t max_memtable_id)
       : cf_name_(cf_name),
         vstorage_(vstorage),
@@ -64,6 +65,7 @@ class ILevelCompactionBuilder {
         mutable_cf_options_(mutable_cf_options),
         ioptions_(ioptions),
         mutable_db_options_(mutable_db_options),
+        full_history_ts_low_(full_history_ts_low),
         ilevel_(mutable_cf_options.ilevel),
         cfd_(cfd),
         max_memtable_id_(max_memtable_id),
@@ -139,7 +141,7 @@ class ILevelCompactionBuilder {
   int parent_index_ = -1;
   int base_index_ = -1;
   double start_level_score_ = 0;
-  bool is_manual_ = false;
+  // bool is_manual_ = false;  // DEPRECATED
   bool is_ilevel_trivial_move_ = false;
   CompactionInputFiles start_level_inputs_;
   std::vector<CompactionInputFiles> compaction_inputs_;
@@ -150,6 +152,7 @@ class ILevelCompactionBuilder {
   const MutableCFOptions& mutable_cf_options_;
   const ImmutableOptions& ioptions_;
   const MutableDBOptions& mutable_db_options_;
+  const std::string& full_history_ts_low_;
   // Pick a path ID to place a newly generated file, with its level
   static uint32_t GetPathId(const ImmutableCFOptions& ioptions,
                             const MutableCFOptions& mutable_cf_options,
@@ -378,9 +381,9 @@ bool ILevelCompactionBuilder::PickRunsToCompact() {
                                                        &start_level_inputs_) ||
            compaction_picker_->FilesRangeOverlapWithCompaction(
                {start_level_inputs_}, output_level_,
-               Compaction::EvaluatePenultimateLevel(
-                   vstorage_, mutable_cf_options_, ioptions_, start_level_,
-                   output_level_)))) {
+               Compaction::EvaluateProximalLevel(vstorage_, mutable_cf_options_,
+                                                 ioptions_, start_level_,
+                                                 output_level_)))) {
         // A locked (pending compaction) input-level file was pulled in due to
         // user-key overlap.
         start_level_inputs_.clear();
@@ -613,9 +616,9 @@ void ILevelCompactionBuilder::SetupOtherFilesWithRoundRobinExpansion() {
                                                     &tmp_start_level_inputs) ||
         compaction_picker_->FilesRangeOverlapWithCompaction(
             {tmp_start_level_inputs}, output_level_,
-            Compaction::EvaluatePenultimateLevel(vstorage_, mutable_cf_options_,
-                                                 ioptions_, start_level_,
-                                                 output_level_))) {
+            Compaction::EvaluateProximalLevel(vstorage_, mutable_cf_options_,
+                                              ioptions_, start_level_,
+                                              output_level_))) {
       // Constraint 1a
       tmp_start_level_inputs.clear();
       return;
@@ -689,9 +692,9 @@ bool ILevelCompactionBuilder::SetupOtherInputsIfNeeded() {
     // We need to disallow this from happening.
     if (compaction_picker_->FilesRangeOverlapWithCompaction(
             compaction_inputs_, output_level_,
-            Compaction::EvaluatePenultimateLevel(vstorage_, mutable_cf_options_,
-                                                 ioptions_, start_level_,
-                                                 output_level_))) {
+            Compaction::EvaluateProximalLevel(vstorage_, mutable_cf_options_,
+                                              ioptions_, start_level_,
+                                              output_level_))) {
       // This compaction output could potentially conflict with the output
       // of a currently running compaction, we cannot run it.
       return false;
@@ -731,9 +734,8 @@ Compaction* ILevelCompactionBuilder::GetCompaction() {
       mutable_cf_options_.default_write_temperature,
       /* max_subcompactions */ 0, std::move(grandparents_),
       /* earliest_snapshot */ std::nullopt, /* snapshot_checker */ nullptr,
-      is_manual_,
-      /* trim_ts */ "", start_level_score_, false /* deletion_compaction */,
-      ilevel_files_might_overlap, compaction_reason_);
+      compaction_reason_,
+      /* trim_ts */ "", start_level_score_, ilevel_files_might_overlap);
 
   // If it's level i or smaller compaction, make sure we don't execute any other
   // related level compactions in parallel
@@ -743,7 +745,8 @@ Compaction* ILevelCompactionBuilder::GetCompaction() {
   // takes running compactions into account (by skipping files that are already
   // being compacted). Since we just changed compaction score, we recalculate it
   // here
-  vstorage_->ComputeCompactionScore(ioptions_, mutable_cf_options_);
+  vstorage_->ComputeCompactionScore(ioptions_, mutable_cf_options_,
+                                    full_history_ts_low_);
   return c;
 }
 
@@ -782,10 +785,11 @@ Compaction* ILevelCompactionPicker::PickCompaction(
     const MutableDBOptions& mutable_db_options,
     const std::vector<SequenceNumber>& /*existing_snapshots */,
     const SnapshotChecker* /*snapshot_checker*/, VersionStorageInfo* vstorage,
-    LogBuffer* log_buffer, uint64_t max_memtable_id) {
-  ILevelCompactionBuilder builder(cf_name, vstorage, this, log_buffer,
-                                  mutable_cf_options, ioptions_,
-                                  mutable_db_options, cfd_, max_memtable_id);
+    LogBuffer* log_buffer, const std::string& full_history_ts_low,
+    bool /* require_max_output_level*/, uint64_t max_memtable_id) {
+  ILevelCompactionBuilder builder(
+      cf_name, vstorage, this, log_buffer, mutable_cf_options, ioptions_,
+      mutable_db_options, full_history_ts_low, cfd_, max_memtable_id);
   return builder.PickCompaction();
 }
 

@@ -3245,7 +3245,7 @@ bool DBImpl::NeedCompactionInsteadOfFlush(ColumnFamilyData* cfd) {
   uint64_t max_next_log_number = 0;
 
   const bool needs_to_sync_closed_wals =
-      logfile_number_ > 0 &&
+      cur_wal_number_ > 0 &&
       (versions_->GetColumnFamilySet()->NumberOfColumnFamilies() > 1 ||
        allow_2pc());
 
@@ -4000,7 +4000,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
       // if this compaction is from Memtable to Level 0; only useful
       // when pure leveling is enabled
       const bool needs_to_sync_closed_wals =
-          logfile_number_ > 0 &&
+          cur_wal_number_ > 0 &&
           (versions_->GetColumnFamilySet()->NumberOfColumnFamilies() > 1 ||
            allow_2pc());
 

@@ -25,7 +25,8 @@ class FIFOCompactionPicker : public CompactionPicker {
       const SnapshotChecker* /* snapshot_checker */,
       VersionStorageInfo* version, LogBuffer* log_buffer,
       const std::string& /* full_history_ts_low */,
-      bool /* require_max_output_level*/ = false, uint64_t max_memtable_id = std::numeric_limits<uint64_t>::max()) override;
+      bool /* require_max_output_level*/ = false,
+      uint64_t max_memtable_id = std::numeric_limits<uint64_t>::max()) override;
 
   Compaction* PickCompactionForCompactRange(
       const std::string& cf_name, const MutableCFOptions& mutable_cf_options,

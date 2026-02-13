@@ -114,7 +114,7 @@ AdvancedColumnFamilyOptions::AdvancedColumnFamilyOptions(const Options& options)
       prepopulate_blob_cache(options.prepopulate_blob_cache),
       persist_user_defined_timestamps(options.persist_user_defined_timestamps),
       level_compaction_granularity(options.level_compaction_granularity),
-      fluidlsm_policy(options.fluidlsm_policy) {
+      fluidlsm_policy(options.fluidlsm_policy),
       memtable_op_scan_flush_trigger(options.memtable_op_scan_flush_trigger),
       memtable_avg_op_scan_flush_trigger(
           options.memtable_avg_op_scan_flush_trigger) {

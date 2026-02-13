@@ -2583,7 +2583,7 @@ bool CompactionJob::UpdateInternalStatsFromInputFiles(
     for (auto mem : mems) {
       uint64_t mem_input_entries = mem->NumEntries();
       uint64_t mem_num_range_del = mem->NumRangeDeletion();
-      compaction_stats_.stats.num_input_records += mem_input_entries;
+      internal_stats_.output_level_stats.num_input_records += mem_input_entries;
       if (num_input_range_del) {
         *num_input_range_del += mem_num_range_del;
       }

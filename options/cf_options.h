@@ -182,14 +182,14 @@ struct MutableCFOptions {
         bottommost_file_compaction_delay(
             options.bottommost_file_compaction_delay),
         uncache_aggressiveness(options.uncache_aggressiveness),
+        memtable_op_scan_flush_trigger(options.memtable_op_scan_flush_trigger),
+        memtable_avg_op_scan_flush_trigger(
+            options.memtable_avg_op_scan_flush_trigger),
         ilevel(options.ilevel),
         is_pure_leveling(options.is_pure_leveling),
         dynamic_file_size(options.dynamic_file_size),
         level_compaction_granularity(options.level_compaction_granularity),
         fluidlsm_policy(options.fluidlsm_policy) {
-        memtable_op_scan_flush_trigger(options.memtable_op_scan_flush_trigger),
-        memtable_avg_op_scan_flush_trigger(
-            options.memtable_avg_op_scan_flush_trigger) {
     RefreshDerivedOptions(options.num_levels, options.compaction_style);
   }
 
@@ -248,10 +248,10 @@ struct MutableCFOptions {
         memtable_max_range_deletions(0),
         bottommost_file_compaction_delay(0),
         uncache_aggressiveness(0),
+        memtable_op_scan_flush_trigger(0),
+        memtable_avg_op_scan_flush_trigger(0),
         ilevel(0),
         dynamic_file_size(false) {}
-        memtable_op_scan_flush_trigger(0),
-        memtable_avg_op_scan_flush_trigger(0) {}
 
   explicit MutableCFOptions(const Options& options);
 

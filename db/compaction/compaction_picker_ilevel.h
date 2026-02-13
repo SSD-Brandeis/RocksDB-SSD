@@ -8,7 +8,7 @@ class ILevelCompactionPicker : public CompactionPicker {
  public:
   ILevelCompactionPicker(const ImmutableOptions& ioptions,
                          const InternalKeyComparator* icmp,
-                        ColumnFamilyData* cfd)
+                         ColumnFamilyData* cfd)
       : CompactionPicker(ioptions, icmp), cfd_(cfd) {}
   Compaction* PickCompaction(
       const std::string& cf_name, const MutableCFOptions& mutable_cf_options,
@@ -16,7 +16,9 @@ class ILevelCompactionPicker : public CompactionPicker {
       const std::vector<SequenceNumber>& /* existing_snapshots */,
       const SnapshotChecker* /* snapshot_checker */,
       VersionStorageInfo* vstorage, LogBuffer* log_buffer,
-      uint64_t max_memtable_id) override;
+      const std::string& full_history_ts_low,
+      bool /*require_max_output_level*/ = false,
+      uint64_t max_memtable_id = std::numeric_limits<uint64_t>::max()) override;
 
   bool NeedsCompaction(const VersionStorageInfo* vstorage) const override;
 
