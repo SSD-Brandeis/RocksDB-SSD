@@ -72,6 +72,23 @@ enum Tag : uint32_t {
   kWalAddition2,
   kWalDeletion2,
   kPersistUserDefinedTimestamps,
+  kSubcompactionProgress,
+};
+
+enum SubcompactionProgressPerLevelCustomTag : uint32_t {
+  kSubcompactionProgressPerLevelTerminate = 1,  // End of fields marker
+  kOutputFilesDelta = 2,
+  kNumProcessedOutputRecords = 3,
+  kSubcompactionProgressPerLevelCustomTagSafeIgnoreMask = 1 << 16,
+};
+
+enum SubcompactionProgressCustomTag : uint32_t {
+  kSubcompactionProgressTerminate = 1,  // End of fields marker
+  kNextInternalKeyToCompact = 2,
+  kNumProcessedInputRecords = 3,
+  kOutputLevelProgress = 4,
+  kProximalOutputLevelProgress = 5,
+  kSubcompactionProgressCustomTagSafeIgnoreMask = 1 << 16,
 };
 
 enum NewFileCustomTag : uint32_t {
@@ -110,7 +127,7 @@ constexpr uint64_t kUnknownOldestAncesterTime = 0;
 constexpr uint64_t kUnknownNewestKeyTime = 0;
 constexpr uint64_t kUnknownFileCreationTime = 0;
 constexpr uint64_t kUnknownEpochNumber = 0;
-// If `Options::allow_ingest_behind` is true, this epoch number
+// If `Options::cf_allow_ingest_behind` is true, this epoch number
 // will be dedicated to files ingested behind.
 constexpr uint64_t kReservedEpochNumberForFileIngestedBehind = 1;
 
@@ -259,6 +276,14 @@ struct FileMetaData {
   // false, it's explicitly written to Manifest.
   bool user_defined_timestamps_persisted = true;
 
+  // Minimum user-defined timestamp in the file. Empty if no UDT or unknown.
+  // This is populated from the table properties "rocksdb.timestamp_min".
+  std::string min_timestamp;
+
+  // Maximum user-defined timestamp in the file. Empty if no UDT or unknown.
+  // This is populated from the table properties "rocksdb.timestamp_max".
+  std::string max_timestamp;
+
   FileMetaData() = default;
 
   FileMetaData(uint64_t file, uint32_t file_path_id, uint64_t file_size,
@@ -271,7 +296,9 @@ struct FileMetaData {
                const std::string& _file_checksum_func_name,
                UniqueId64x2 _unique_id,
                const uint64_t _compensated_range_deletion_size,
-               uint64_t _tail_size, bool _user_defined_timestamps_persisted)
+               uint64_t _tail_size, bool _user_defined_timestamps_persisted,
+               const std::string& _min_timestamp,
+               const std::string& _max_timestamp)
       : fd(file, file_path_id, file_size, smallest_seq, largest_seq),
         smallest(smallest_key),
         largest(largest_key),
@@ -286,7 +313,9 @@ struct FileMetaData {
         file_checksum_func_name(_file_checksum_func_name),
         unique_id(std::move(_unique_id)),
         tail_size(_tail_size),
-        user_defined_timestamps_persisted(_user_defined_timestamps_persisted) {
+        user_defined_timestamps_persisted(_user_defined_timestamps_persisted),
+        min_timestamp(_min_timestamp),
+        max_timestamp(_max_timestamp) {
     TEST_SYNC_POINT_CALLBACK("FileMetaData::FileMetaData", this);
   }
 
@@ -369,7 +398,8 @@ struct FileMetaData {
     usage += sizeof(*this);
 #endif  // ROCKSDB_MALLOC_USABLE_SIZE
     usage += smallest.size() + largest.size() + file_checksum.size() +
-             file_checksum_func_name.size();
+             file_checksum_func_name.size() + min_timestamp.size() +
+             max_timestamp.size();
     return usage;
   }
 
@@ -379,6 +409,33 @@ struct FileMetaData {
     bool res = num_range_deletions == 1 && num_entries == num_range_deletions;
     assert(!res || fd.smallest_seqno == fd.largest_seqno);
     return res;
+  }
+
+  static uint64_t CalculateTailSize(uint64_t file_size,
+                                    const TableProperties& props) {
+#ifndef NDEBUG
+    bool skip = false;
+    TEST_SYNC_POINT_CALLBACK("FileMetaData::CalculateTailSize", &skip);
+    if (skip) {
+      return 0;
+    }
+#endif  // NDEBUG
+    uint64_t tail_size = 0;
+
+    // Differentiate between a file with no data blocks (tail_start_offset = 0)
+    // and a file with unknown tail_start_offset (also set to 0 due to
+    // non-negative integer storage limitation)
+    bool contain_no_data_blocks =
+        props.num_entries == 0 ||
+        (props.num_entries > 0 &&
+         (props.num_entries == props.num_range_deletions));
+
+    if (props.tail_start_offset > 0 || contain_no_data_blocks) {
+      assert(props.tail_start_offset <= file_size);
+      tail_size = file_size - props.tail_start_offset;
+    }
+
+    return tail_size;
   }
 };
 
@@ -417,6 +474,174 @@ struct LevelFilesBrief {
   }
 };
 
+struct SubcompactionProgressPerLevel {
+  uint64_t GetNumProcessedOutputRecords() const {
+    return num_processed_output_records_;
+  }
+
+  void SetNumProcessedOutputRecords(uint64_t num) {
+    num_processed_output_records_ = num;
+  }
+
+  const autovector<FileMetaData>& GetOutputFiles() const {
+    return output_files_;
+  }
+
+  void AddToOutputFiles(const FileMetaData& file) {
+    output_files_.push_back(file);
+  }
+
+  size_t GetLastPersistedOutputFilesCount() const {
+    return last_persisted_output_files_count_;
+  }
+
+  void UpdateLastPersistedOutputFilesCount() {
+    last_persisted_output_files_count_ = output_files_.size();
+  }
+
+  void EncodeTo(std::string* dst) const;
+
+  Status DecodeFrom(Slice* input);
+
+  void Clear() {
+    num_processed_output_records_ = 0;
+    output_files_.clear();
+    last_persisted_output_files_count_ = 0;
+  }
+
+  std::string ToString() const {
+    std::ostringstream oss;
+    oss << "SubcompactionProgressPerLevel{";
+    oss << " num_processed_output_records=" << num_processed_output_records_;
+    oss << ", output_files_count=" << output_files_.size();
+    oss << ", last_persisted_output_files_count="
+        << last_persisted_output_files_count_;
+    oss << " }";
+    return oss.str();
+  }
+
+  void TEST_ClearOutputFiles() { output_files_.clear(); }
+
+ private:
+  uint64_t num_processed_output_records_ = 0;
+
+  autovector<FileMetaData> output_files_ = {};
+
+  // Number of files already persisted to help calculate the new output files to
+  // persist in the future. This is to prevent having to persist all the output
+  // files metadata so far every time of a "snapshot" of a progress is persisted
+  // which can lead to O(1+2+...+n) = O(n^2) file metadata being persisted. The
+  // current approach of persisting only the delta should always persist
+  // exactly the number (n) of output files in total.
+  size_t last_persisted_output_files_count_ = 0;
+
+  void EncodeOutputFiles(std::string* dst) const;
+
+  Status DecodeOutputFiles(Slice* input,
+                           autovector<FileMetaData>& temp_storage);
+};
+
+struct SubcompactionProgress {
+  std::string next_internal_key_to_compact;
+
+  uint64_t num_processed_input_records = 0;
+
+  SubcompactionProgressPerLevel output_level_progress;
+
+  SubcompactionProgressPerLevel proximal_output_level_progress;
+
+  SubcompactionProgress() = default;
+
+  void Clear() {
+    next_internal_key_to_compact.clear();
+    num_processed_input_records = 0;
+    output_level_progress.Clear();
+    proximal_output_level_progress.Clear();
+  }
+
+  void EncodeTo(std::string* dst) const;
+
+  Status DecodeFrom(Slice* input);
+
+  std::string ToString() const {
+    std::ostringstream oss;
+    oss << "SubcompactionProgress{";
+    oss << " next_internal_key_to_compact=";
+    if (next_internal_key_to_compact.empty()) {
+      oss << "";
+    } else {
+      ParsedInternalKey parsed_key;
+      Slice key_slice(next_internal_key_to_compact);
+      if (ParseInternalKey(key_slice, &parsed_key, false /* log_err_key */)
+              .ok()) {
+        oss << "user_key(hex)=" << parsed_key.user_key.ToString(true /* hex */);
+        oss << ", seq=";
+        if (parsed_key.sequence == kMaxSequenceNumber) {
+          oss << "kMaxSequenceNumber";
+        } else {
+          oss << parsed_key.sequence;
+        }
+        oss << ", type=";
+        if (parsed_key.type == kValueTypeForSeek) {
+          oss << "kValueTypeForSeek";
+        } else {
+          oss << static_cast<int>(parsed_key.type);
+        }
+      } else {
+        oss << "raw=" << key_slice.ToString(true /* hex */);
+      }
+    }
+    oss << ", num_processed_input_records=" << num_processed_input_records;
+    oss << ", output_level_progress=" << output_level_progress.ToString();
+    oss << ", proximal_output_level_progress="
+        << proximal_output_level_progress.ToString();
+    oss << " }";
+    return oss.str();
+  }
+};
+
+class VersionEdit;
+
+// Builder class to reconstruct complete subcompaction progress object
+// from multiple decoded VersionEdits containing delta output files information
+// of the same subcompaction. See
+// `SubcompactionProgressPerLevel::last_persisted_output_files_count_`'s comment
+//
+// WARNING: This class currently assumes all input VersionEdits contain progress
+// information for the SAME subcompaction. It does not validate
+// progress data from different subcompactions so mixing progress from
+// multiple subcompactions can result in corrupted state silently. The caller is
+// responsible for ensuring all VersionEdits processed by a single instance
+// of this builder correspond to the same subcompaction.
+class SubcompactionProgressBuilder {
+ public:
+  SubcompactionProgressBuilder() = default;
+
+  bool ProcessVersionEdit(const VersionEdit& edit);
+
+  const SubcompactionProgress& GetAccumulatedSubcompactionProgress() const {
+    return accumulated_subcompaction_progress_;
+  }
+
+  bool HasAccumulatedSubcompactionProgress() const {
+    return has_subcompaction_progress_;
+  }
+
+  void Clear();
+
+ private:
+  void MergeDeltaProgress(const SubcompactionProgress& delta_progress);
+
+  void MaybeMergeDeltaProgressPerLevel(
+      SubcompactionProgressPerLevel& accumulated_level_progress,
+      const SubcompactionProgressPerLevel& delta_level_progress);
+
+  SubcompactionProgress accumulated_subcompaction_progress_;
+  bool has_subcompaction_progress_ = false;
+};
+
+// Type alias for backward compatibility - vector of subcompaction progress
+using CompactionProgress = std::vector<SubcompactionProgress>;
 
 // The state of a DB at any given time is referred to as a Version.
 // Any modification to the Version is considered a Version Edit. A Version is
@@ -424,6 +649,19 @@ struct LevelFilesBrief {
 // to the MANIFEST file.
 class VersionEdit {
  public:
+  // Retrieve the table files added as well as their associated levels.
+  using NewFiles = std::vector<std::pair<int, FileMetaData>>;
+
+  static void EncodeToNewFile4(const FileMetaData& f, int level, size_t ts_sz,
+                               bool has_min_log_number_to_keep,
+                               uint64_t min_log_number_to_keep,
+                               bool& min_log_num_written, std::string* dst);
+
+  static const char* DecodeNewFile4From(Slice* input, int& max_level,
+                                        uint64_t& min_log_number_to_keep,
+                                        bool& has_min_log_number_to_keep,
+                                        NewFiles& new_files, FileMetaData& f);
+
   void Clear();
 
   void SetDBId(const std::string& db_id) {
@@ -516,17 +754,19 @@ class VersionEdit {
                const std::string& file_checksum_func_name,
                const UniqueId64x2& unique_id,
                const uint64_t compensated_range_deletion_size,
-               uint64_t tail_size, bool user_defined_timestamps_persisted) {
+               uint64_t tail_size, bool user_defined_timestamps_persisted,
+               const std::string& min_timestamp = "",
+               const std::string& max_timestamp = "") {
     assert(smallest_seqno <= largest_seqno);
     new_files_.emplace_back(
         level,
-        FileMetaData(file, file_path_id, file_size, smallest, largest,
-                     smallest_seqno, largest_seqno, marked_for_compaction,
-                     temperature, oldest_blob_file_number, oldest_ancester_time,
-                     file_creation_time, epoch_number, file_checksum,
-                     file_checksum_func_name, unique_id,
-                     compensated_range_deletion_size, tail_size,
-                     user_defined_timestamps_persisted));
+        FileMetaData(
+            file, file_path_id, file_size, smallest, largest, smallest_seqno,
+            largest_seqno, marked_for_compaction, temperature,
+            oldest_blob_file_number, oldest_ancester_time, file_creation_time,
+            epoch_number, file_checksum, file_checksum_func_name, unique_id,
+            compensated_range_deletion_size, tail_size,
+            user_defined_timestamps_persisted, min_timestamp, max_timestamp));
     files_to_quarantine_.push_back(file);
     if (!HasLastSequence() || largest_seqno > GetLastSequence()) {
       SetLastSequence(largest_seqno);
@@ -542,8 +782,6 @@ class VersionEdit {
     }
   }
 
-  // Retrieve the table files added as well as their associated levels.
-  using NewFiles = std::vector<std::pair<int, FileMetaData>>;
   const NewFiles& GetNewFiles() const { return new_files_; }
 
   NewFiles& GetMutableNewFiles() { return new_files_; }
@@ -713,6 +951,22 @@ class VersionEdit {
     full_history_ts_low_ = std::move(full_history_ts_low);
   }
 
+  void SetSubcompactionProgress(const SubcompactionProgress& progress) {
+    has_subcompaction_progress_ = true;
+    subcompaction_progress_ = progress;
+  }
+
+  bool HasSubcompactionProgress() const { return has_subcompaction_progress_; }
+
+  const SubcompactionProgress& GetSubcompactionProgress() const {
+    return subcompaction_progress_;
+  }
+
+  void ClearSubcompactionProgress() {
+    has_subcompaction_progress_ = false;
+    subcompaction_progress_.Clear();
+  }
+
   // return true on success.
   // `ts_sz` is the size in bytes for the user-defined timestamp contained in
   // a user key. This argument is optional because it's only required for
@@ -735,15 +989,22 @@ class VersionEdit {
   std::string DebugJSON(int edit_num, bool hex_key = false) const;
 
  private:
-  bool GetLevel(Slice* input, int* level, const char** msg);
-
-  const char* DecodeNewFile4From(Slice* input);
-
+  // Decode level information from serialized VersionEdit data and and track the
+  // maximum level seen.
+  //
+  // Parameters:
+  //   input: Pointer to serialized data slice
+  //   level: Output parameter for the decoded level value
+  //   max_level: get updated if the decoded level is higher than passed in
+  //   value
+  //
+  // Returns: true on successful decode, false on parse error
+  static bool GetLevel(Slice* input, int* level, int& max_level);
   // Encode file boundaries `FileMetaData.smallest` and `FileMetaData.largest`.
   // User-defined timestamps in the user key will be stripped if they shouldn't
   // be persisted.
-  void EncodeFileBoundaries(std::string* dst, const FileMetaData& meta,
-                            size_t ts_sz) const;
+  static void EncodeFileBoundaries(std::string* dst, const FileMetaData& meta,
+                                   size_t ts_sz);
 
   int max_level_ = 0;
   std::string db_id_;
@@ -793,6 +1054,9 @@ class VersionEdit {
 
   std::string full_history_ts_low_;
   bool persist_user_defined_timestamps_ = true;
+
+  bool has_subcompaction_progress_ = false;
+  SubcompactionProgress subcompaction_progress_;
 
   // Newly created table files and blob files are eligible for deletion if they
   // are not registered as live files after the background jobs creating them

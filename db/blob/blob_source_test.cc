@@ -67,7 +67,7 @@ void WriteBlobFile(const ImmutableOptions& immutable_options,
 
   ASSERT_OK(blob_log_writer.WriteHeader(WriteOptions(), header));
 
-  std::vector<std::string> compressed_blobs(num);
+  std::vector<GrowableBuffer> compressed_blobs(num);
   std::vector<Slice> blobs_to_write(num);
   if (kNoCompression == compression) {
     for (size_t i = 0; i < num; ++i) {
@@ -75,17 +75,13 @@ void WriteBlobFile(const ImmutableOptions& immutable_options,
       blob_sizes[i] = blobs[i].size();
     }
   } else {
-    CompressionOptions opts;
-    CompressionContext context(compression, opts);
-    constexpr uint64_t sample_for_compression = 0;
-    CompressionInfo info(opts, context, CompressionDict::GetEmptyDict(),
-                         compression, sample_for_compression);
-
-    constexpr uint32_t compression_format_version = 2;
+    auto compressor =
+        GetBuiltinV2CompressionManager()->GetCompressor({}, compression);
 
     for (size_t i = 0; i < num; ++i) {
-      ASSERT_TRUE(CompressData(blobs[i], info, compression_format_version,
-                               &compressed_blobs[i]));
+      ASSERT_OK(LegacyForceBuiltinCompression(*compressor,
+                                              /*working_area=*/nullptr,
+                                              blobs[i], &compressed_blobs[i]));
       blobs_to_write[i] = compressed_blobs[i];
       blob_sizes[i] = compressed_blobs[i].size();
     }

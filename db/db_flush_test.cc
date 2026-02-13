@@ -101,7 +101,7 @@ TEST_F(DBFlushTest, SyncFail) {
   TEST_SYNC_POINT("DBFlushTest::SyncFail:2");
   fault_injection_env->SetFilesystemActive(true);
   // Now the background job will do the flush; wait for it.
-  // Returns the IO error happend during flush.
+  // Returns the IO error happened during flush.
   ASSERT_NOK(dbfull()->TEST_WaitForFlushMemTable());
   ASSERT_EQ("", FilesPerLevel());  // flush failed.
   Destroy(options);
@@ -518,11 +518,11 @@ TEST_F(DBFlushTest, StatisticsGarbageInsertAndDeletes) {
   // Note : one set of delete for KEY1, KEY2, KEY3 is written to
   // SSTable to propagate the delete operations to K-V pairs
   // that could have been inserted into the database during past Flush
-  // opeartions.
+  // operations.
   EXPECTED_MEMTABLE_GARBAGE_BYTES_AT_FLUSH -=
       KEY1.size() + KEY2.size() + KEY3.size() + 3 * sizeof(uint64_t);
 
-  // Additional useful paylaod.
+  // Additional useful payload.
   ASSERT_OK(Delete(KEY4));
   ASSERT_OK(Delete(KEY5));
   ASSERT_OK(Delete(KEY6));
@@ -614,7 +614,7 @@ TEST_F(DBFlushTest, StatisticsGarbageRangeDeletes) {
 
   // Note : one set of deleteRange for (KEY1, KEY2) and (KEY2, KEY3) is written
   // to SSTable to propagate the deleteRange operations to K-V pairs that could
-  // have been inserted into the database during past Flush opeartions.
+  // have been inserted into the database during past Flush operations.
   EXPECTED_MEMTABLE_GARBAGE_BYTES_AT_FLUSH -=
       (KEY1.size() + KEY2.size() + sizeof(uint64_t)) +
       (KEY2.size() + KEY3.size() + sizeof(uint64_t));
@@ -842,7 +842,7 @@ TEST_F(DBFlushTest, FixFlushReasonRaceFromConcurrentFlushes) {
     ASSERT_OK(Put(1, Key(idx), std::string(1, 'v')));
   }
 
-  // To coerce a manual flush happenning in the middle of GetLiveFiles's flush,
+  // To coerce a manual flush happening in the middle of GetLiveFiles's flush,
   // we need to pause background flush thread and enable it later.
   std::shared_ptr<test::SleepingBackgroundTask> sleeping_task =
       std::make_shared<test::SleepingBackgroundTask>();
@@ -851,7 +851,7 @@ TEST_F(DBFlushTest, FixFlushReasonRaceFromConcurrentFlushes) {
                  sleeping_task.get(), Env::Priority::HIGH);
   sleeping_task->WaitUntilSleeping();
 
-  // Coerce a manual flush happenning in the middle of GetLiveFiles's flush
+  // Coerce a manual flush happening in the middle of GetLiveFiles's flush
   bool get_live_files_paused_at_sync_point = false;
   ROCKSDB_NAMESPACE::SyncPoint::GetInstance()->SetCallBack(
       "DBImpl::AtomicFlushMemTables:AfterScheduleFlush", [&](void* /* arg */) {
@@ -1428,7 +1428,7 @@ TEST_F(DBFlushTest, MemPurgeDeleteAndDeleteRange) {
   Close();
 }
 
-// Create a Compaction Fitler that will be invoked
+// Create a Compaction Filter that will be invoked
 // at flush time and will update the value of a KV pair
 // if the key string is "lower" than the filter_key_ string.
 class ConditionalUpdateFilter : public CompactionFilter {
@@ -3504,6 +3504,209 @@ TEST_F(DBFlushTest, DBStuckAfterAtomicFlushError) {
   ASSERT_OK(dbfull()->TEST_WaitForBackgroundWork());
   ASSERT_EQ(1, NumTableFilesAtLevel(0));
 }
+
+TEST_F(DBFlushTest, VerifyOutputRecordCount) {
+  for (bool use_plain_table : {false, true}) {
+    Options options = CurrentOptions();
+    options.flush_verify_memtable_count = true;
+    options.merge_operator = MergeOperators::CreateStringAppendOperator();
+    DestroyAndReopen(options);
+    // Verify flush output record count verification in different table
+    // formats
+    if (use_plain_table) {
+      options.table_factory.reset(NewPlainTableFactory());
+    }
+
+    // Verify that flush output record count verification does not produce false
+    // positives.
+    ASSERT_OK(Merge("k0", "v1"));
+    ASSERT_OK(Put("k1", "v1"));
+    ASSERT_OK(Put("k2", "v1"));
+    ASSERT_OK(SingleDelete("k2"));
+    ASSERT_OK(Delete("k2"));
+    ASSERT_OK(Delete("k3"));
+    ASSERT_OK(db_->DeleteRange(WriteOptions(), "k1", "k3"));
+    ASSERT_OK(Flush());
+
+    // Verify that flush output record count verification catch corruption
+    DestroyAndReopen(options);
+    if (use_plain_table) {
+      ROCKSDB_NAMESPACE::SyncPoint::GetInstance()->SetCallBack(
+          "PlainTableBuilder::Add::skip",
+          [&](void* skip) { *(bool*)skip = true; });
+
+    } else {
+      ROCKSDB_NAMESPACE::SyncPoint::GetInstance()->SetCallBack(
+          "BlockBasedTableBuilder::Add::skip",
+          [&](void* skip) { *(bool*)skip = true; });
+    }
+    SyncPoint::GetInstance()->EnableProcessing();
+    const char* expect =
+        "Number of keys in flush output SST files does not match";
+
+    // 1. During DB open flush
+    ASSERT_OK(Put("k1", "v1"));
+    ASSERT_OK(Put("k2", "v1"));
+    Status s = TryReopen(options);
+    ASSERT_TRUE(s.IsCorruption());
+    ASSERT_TRUE(std::strstr(s.getState(), expect));
+
+    // 2. During regular flush
+    DestroyAndReopen(options);
+    ASSERT_OK(Put("k1", "v1"));
+    ASSERT_OK(Put("k2", "v1"));
+    s = Flush();
+    ASSERT_TRUE(s.IsCorruption());
+    ASSERT_TRUE(std::strstr(s.getState(), expect));
+    ROCKSDB_NAMESPACE::SyncPoint::GetInstance()->DisableProcessing();
+  }
+}
+
+class DBFlushSuperBlockTest
+    : public DBFlushTest,
+      public ::testing::WithParamInterface<std::tuple<bool, size_t, size_t>> {
+ public:
+  DBFlushSuperBlockTest() : DBFlushTest() {}
+
+  std::string formatKey(int i) {
+    int desired_length = 10;
+    char buffer[64];
+    snprintf(buffer, 64, "%0*d", desired_length, i);
+    return buffer;
+  }
+
+  void VerifyReadWithGet(int key_count) {
+    for (int i = 0; i < key_count; ++i) {
+      PinnableSlice value;
+      ASSERT_OK(Get(formatKey(i), &value));
+      ASSERT_EQ(value.ToString(), added_data[formatKey(i)]);
+    }
+  }
+
+  void VerifyReadWithIterator(int key_count) {
+    {
+      std::unique_ptr<Iterator> it(db_->NewIterator(ReadOptions()));
+      int i = 0;
+      for (it->SeekToFirst(); it->Valid(); it->Next()) {
+        ASSERT_OK(it->status());
+        ASSERT_EQ((it->key()).ToString(), formatKey(i));
+        ASSERT_EQ((it->value()).ToString(), added_data[formatKey(i)]);
+        i++;
+      }
+      ASSERT_OK(it->status());
+      ASSERT_EQ(i, key_count);
+    }
+  }
+
+ protected:
+  Random rnd{123};
+  std::unordered_map<std::string, std::string> added_data;
+};
+
+constexpr size_t kLowSpaceOverheadRatio = 256;
+
+TEST_P(DBFlushSuperBlockTest, SuperBlock) {
+  constexpr int key_count = 12345;
+  Options options;
+  options.env = env_;
+  options.file_checksum_gen_factory = GetFileChecksumGenCrc32cFactory();
+  options.paranoid_file_checks = true;
+  options.write_buffer_size = 1024 * 1024;
+  BlockBasedTableOptions block_options;
+  block_options.block_align = get<0>(GetParam());
+  block_options.index_block_restart_interval = 3;
+  block_options.super_block_alignment_size = get<1>(GetParam());
+  block_options.super_block_alignment_space_overhead_ratio = get<2>(GetParam());
+  options.table_factory.reset(NewBlockBasedTableFactory(block_options));
+  if (block_options.block_align) {
+    // When block align is enabled, disable compression
+    options.compression = kNoCompression;
+  }
+
+  ASSERT_OK(options.table_factory->ValidateOptions(
+      DBOptions(options), ColumnFamilyOptions(options)));
+
+  Reopen(options);
+
+  int super_block_pad_count = 0;
+  int super_block_pad_exceed_limit_count = 0;
+  SyncPoint::GetInstance()->SetCallBack(
+      "BlockBasedTableBuilder::WriteMaybeCompressedBlock:"
+      "SuperBlockAlignment",
+      [&super_block_pad_count](void* /*arg*/) { super_block_pad_count++; });
+  SyncPoint::GetInstance()->SetCallBack(
+      "BlockBasedTableBuilder::WriteMaybeCompressedBlock:"
+      "SuperBlockAlignmentPaddingBytesExceedLimit",
+      [&super_block_pad_exceed_limit_count](void* /*arg*/) {
+        super_block_pad_exceed_limit_count++;
+      });
+  SyncPoint::GetInstance()->EnableProcessing();
+
+  // Add lots of keys
+  for (int i = 0; i < key_count; ++i) {
+    added_data[formatKey(i)] = std::string(rnd.RandomString(rnd.Next() % 1000));
+    ASSERT_OK(Put(formatKey(i), added_data[formatKey(i)]));
+  }
+
+  // flush the data in memory to disk to verify with super block alignment, the
+  // data could be read back properly
+  Reopen(options);
+
+  SyncPoint::GetInstance()->DisableProcessing();
+  SyncPoint::GetInstance()->ClearAllCallBacks();
+
+  // When block_align is enabled, super block is always aligned, so there should
+  // be 0 padding for super block alignment
+  if (block_options.super_block_alignment_size != 0 &&
+      !block_options.block_align) {
+    ASSERT_GT(super_block_pad_count, 0);
+  } else {
+    ASSERT_EQ(super_block_pad_count, 0);
+  }
+
+  if (!block_options.block_align &&
+      block_options.super_block_alignment_size != 0 &&
+      block_options.super_block_alignment_space_overhead_ratio ==
+          kLowSpaceOverheadRatio) {
+    ASSERT_GT(super_block_pad_exceed_limit_count, 0);
+  }
+
+  // verify the values are correct
+  VerifyReadWithGet(key_count);
+  Reopen(options);
+  VerifyReadWithIterator(key_count);
+
+  // verify checksum
+  ASSERT_OK(db_->VerifyFileChecksums(ReadOptions()));
+
+  // Reopen options and flip the option of super block configuration, read still
+  // works. This verifies the forward/backward compatibility
+  if (block_options.super_block_alignment_size == 0) {
+    block_options.super_block_alignment_size = 16 * 1024;
+  } else {
+    block_options.super_block_alignment_size = 0;
+  }
+  options.table_factory.reset(NewBlockBasedTableFactory(block_options));
+
+  Reopen(options);
+
+  // verify the values are correct
+  VerifyReadWithGet(key_count);
+  Reopen(options);
+  VerifyReadWithIterator(key_count);
+
+  // verify checksum
+  ASSERT_OK(db_->VerifyFileChecksums(ReadOptions()));
+}
+
+INSTANTIATE_TEST_CASE_P(
+    SuperBlockTests, DBFlushSuperBlockTest,
+    testing::Combine(testing::Bool(), testing::Values(0, 32 * 1024, 16 * 1024),
+                     // Use very low space overhead ratio to test
+                     // the case where required padded bytes is
+                     // larger than the max allowed padding size
+                     testing::Values(4, kLowSpaceOverheadRatio)));
+
 }  // namespace ROCKSDB_NAMESPACE
 
 int main(int argc, char** argv) {

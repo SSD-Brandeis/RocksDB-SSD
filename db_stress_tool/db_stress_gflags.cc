@@ -135,6 +135,14 @@ DEFINE_bool(histogram, false, "Print histogram of operation timings");
 DEFINE_bool(destroy_db_initially, true,
             "Destroys the database dir before start if this is true");
 
+DEFINE_bool(destroy_db_and_exit, false,
+            "Destroys the database dir and exits. Useful for cleanup without "
+            "running stress test. Other options are mostly ignored.");
+
+DEFINE_string(delete_dir_and_exit, "",
+              "Recursively deletes the specified directory and exits. "
+              "Useful for cleaning up TEST_TMPDIR after crash tests.");
+
 DEFINE_bool(verbose, false, "Verbose");
 
 DEFINE_bool(progress_reports, true,
@@ -167,20 +175,6 @@ DEFINE_int32(min_write_buffer_number_to_merge,
              "in all of these files. Also, an in-memory merge may result in "
              "writing less data to storage if there are duplicate records in"
              " each of these individual write buffers.");
-
-DEFINE_int32(max_write_buffer_number_to_maintain,
-             ROCKSDB_NAMESPACE::Options().max_write_buffer_number_to_maintain,
-             "The total maximum number of write buffers to maintain in memory "
-             "including copies of buffers that have already been flushed. "
-             "Unlike max_write_buffer_number, this parameter does not affect "
-             "flushing. This controls the minimum amount of write history "
-             "that will be available in memory for conflict checking when "
-             "Transactions are used. If this value is too low, some "
-             "transactions may fail at commit time due to not being able to "
-             "determine whether there were any write conflicts. Setting this "
-             "value to 0 will cause write buffers to be freed immediately "
-             "after they are flushed.  If this value is set to -1, "
-             "'max_write_buffer_number' will be used.");
 
 DEFINE_int64(max_write_buffer_size_to_maintain,
              ROCKSDB_NAMESPACE::Options().max_write_buffer_size_to_maintain,
@@ -435,17 +429,6 @@ DEFINE_bool(enable_write_thread_adaptive_yield,
 // Options for StackableDB-based BlobDB
 DEFINE_bool(use_blob_db, false, "[Stacked BlobDB] Use BlobDB.");
 
-DEFINE_uint64(
-    blob_db_min_blob_size,
-    ROCKSDB_NAMESPACE::blob_db::BlobDBOptions().min_blob_size,
-    "[Stacked BlobDB] Smallest blob to store in a file. Blobs "
-    "smaller than this will be inlined with the key in the LSM tree.");
-
-DEFINE_uint64(
-    blob_db_bytes_per_sync,
-    ROCKSDB_NAMESPACE::blob_db::BlobDBOptions().bytes_per_sync,
-    "[Stacked BlobDB] Sync blob files once per every N bytes written.");
-
 DEFINE_uint64(blob_db_file_size,
               ROCKSDB_NAMESPACE::blob_db::BlobDBOptions().blob_file_size,
               "[Stacked BlobDB] Target size of each blob file.");
@@ -454,11 +437,6 @@ DEFINE_bool(
     blob_db_enable_gc,
     ROCKSDB_NAMESPACE::blob_db::BlobDBOptions().enable_garbage_collection,
     "[Stacked BlobDB] Enable BlobDB garbage collection.");
-
-DEFINE_double(
-    blob_db_gc_cutoff,
-    ROCKSDB_NAMESPACE::blob_db::BlobDBOptions().garbage_collection_cutoff,
-    "[Stacked BlobDB] Cutoff ratio for BlobDB garbage collection.");
 
 // Options for integrated BlobDB
 DEFINE_bool(allow_setting_blob_options_dynamically, false,
@@ -481,7 +459,9 @@ DEFINE_uint64(blob_file_size,
 DEFINE_string(blob_compression_type, "none",
               "[Integrated BlobDB] The compression algorithm to use for large "
               "values stored in blob files.");
-
+DEFINE_string(compression_manager, "mixed",
+              "Ability to change compression manager specified in "
+              "simple_mixed_manager.h (mixed -> roundRobin)");
 DEFINE_bool(enable_blob_garbage_collection,
             ROCKSDB_NAMESPACE::AdvancedColumnFamilyOptions()
                 .enable_blob_garbage_collection,
@@ -549,6 +529,9 @@ DEFINE_uint32(use_timed_put_one_in, 0,
 DEFINE_string(file_temperature_age_thresholds, "",
               "See CompactionOptionsFIFO::file_temperature_age_thresholds. "
               "empty == unset");
+
+DEFINE_bool(allow_trivial_copy_when_change_temperature, true,
+            "Allow kChangeTemperature to do trivial copy");
 
 static const bool FLAGS_subcompactions_dummy __attribute__((__unused__)) =
     RegisterFlagValidator(&FLAGS_subcompactions, &ValidateUint32Range);
@@ -733,6 +716,10 @@ DEFINE_uint64(txn_write_policy, 0,
               "TxnDBWritePolicy::WRITE_COMMITTED. Note that this should not be "
               "changed across crashes.");
 
+DEFINE_bool(use_per_key_point_lock_mgr, true,
+            "Use PointLockManager(false) or PerKeyPointLockManager(true) in "
+            "TransactionDB.");
+
 DEFINE_bool(use_optimistic_txn, false, "Use OptimisticTransactionDB.");
 DEFINE_uint64(occ_validation_policy, 1,
               "Optimistic Concurrency Control Validation Policy for "
@@ -813,6 +800,10 @@ DEFINE_int32(
     "If non-zero, then DisableManualCompaction()+Enable will be called "
     "once for every N ops on average.  0 disables.");
 
+DEFINE_int32(abort_and_resume_compactions_one_in, 0,
+             "If non-zero, then AbortAllCompactions()+Resume will be called "
+             "once for every N ops on average. 0 disables.");
+
 DEFINE_int32(compact_range_width, 10000,
              "The width of the ranges passed to CompactRange().");
 
@@ -853,8 +844,28 @@ DEFINE_bool(track_and_verify_wals,
             ROCKSDB_NAMESPACE::Options().track_and_verify_wals,
             "See Options::track_and_verify_wals");
 
-DEFINE_bool(enable_remote_compaction, false,
-            "Enable (simulated) Remote Compaction");
+DEFINE_int32(
+    remote_compaction_worker_threads, 2,
+    "Remote Compaction Worker Thread count. If 0, remote compaction is "
+    "disabled");
+
+DEFINE_int32(remote_compaction_worker_interval, 10,
+             "Remote Compaction Worker Thread dequeue tasks every N "
+             "milliseconds. (Default: 10ms)");
+
+DEFINE_bool(remote_compaction_failure_fall_back_to_local, true,
+            "If true, remote compaction failures will be ignored and "
+            "compactions will fall back to local and retried");
+
+DEFINE_int32(allow_resumption_one_in, 0,
+             "If non-zero, enable resumable compaction with 1/N probability "
+             "for each OpenAndCompact call.Requires "
+             "remote_compaction_worker_threads > 0");
+
+DEFINE_uint32(ingest_wbwi_one_in, 0,
+              "If set, will call"
+              "IngestWriteBatchWithIndex() instead of regular write operations "
+              "once every N writes.");
 
 static bool ValidateInt32Percent(const char* flagname, int32_t value) {
   if (value < 0 || value > 100) {
@@ -963,7 +974,11 @@ DEFINE_uint64(log2_keys_per_lock, 2, "Log2 of number of keys per lock");
 static const bool FLAGS_log2_keys_per_lock_dummy __attribute__((__unused__)) =
     RegisterFlagValidator(&FLAGS_log2_keys_per_lock, &ValidateUint32Range);
 
-DEFINE_uint64(max_manifest_file_size, 16384, "Maximum size of a MANIFEST file");
+DEFINE_uint64(max_manifest_file_size, 16384,
+              "Maximum size of a MANIFEST file (without auto-tuning)");
+
+DEFINE_int32(max_manifest_space_amp_pct, 500,
+             "Max manifest space amp percentage for auto-tuning");
 
 DEFINE_bool(in_place_update, false, "On true, does inplace update in memtable");
 
@@ -1097,10 +1112,6 @@ DEFINE_bool(enable_compaction_filter, false,
 DEFINE_bool(paranoid_file_checks, true,
             "After writing every SST file, reopen it and read all the keys "
             "and validate checksums");
-
-DEFINE_bool(fail_if_options_file_error, false,
-            "Fail operations that fail to detect or properly persist options "
-            "file.");
 
 DEFINE_uint64(batch_protection_bytes_per_key, 0,
               "If nonzero, enables integrity protection in `WriteBatch` at the "
@@ -1379,12 +1390,6 @@ DEFINE_bool(use_adaptive_mutex_lru,
             ROCKSDB_NAMESPACE::LRUCacheOptions().use_adaptive_mutex,
             "LRUCacheOptions.use_adaptive_mutex");
 
-DEFINE_uint32(
-    compress_format_version,
-    static_cast<uint32_t>(ROCKSDB_NAMESPACE::CompressedSecondaryCacheOptions()
-                              .compress_format_version),
-    "CompressedSecondaryCacheOptions.compress_format_version");
-
 DEFINE_uint64(manifest_preallocation_size,
               ROCKSDB_NAMESPACE::Options().manifest_preallocation_size,
               "Options.manifest_preallocation_size");
@@ -1425,6 +1430,17 @@ DEFINE_bool(
 DEFINE_bool(block_align,
             ROCKSDB_NAMESPACE::BlockBasedTableOptions().block_align,
             "BlockBasedTableOptions.block_align");
+
+DEFINE_uint64(
+    super_block_alignment_size,
+    ROCKSDB_NAMESPACE::BlockBasedTableOptions().super_block_alignment_size,
+    "BlockBasedTableOptions.super_block_alignment_size");
+
+DEFINE_uint64(
+    super_block_alignment_space_overhead_ratio,
+    ROCKSDB_NAMESPACE::BlockBasedTableOptions()
+        .super_block_alignment_space_overhead_ratio,
+    "BlockBasedTableOptions.super_block_alignment_space_overhead_ratio");
 
 DEFINE_uint32(
     lowest_used_cache_tier,
@@ -1478,13 +1494,63 @@ DEFINE_bool(paranoid_memory_checks,
             ROCKSDB_NAMESPACE::Options().paranoid_memory_checks,
             "Sets CF option paranoid_memory_checks.");
 
+DEFINE_bool(
+    memtable_veirfy_per_key_checksum_on_seek,
+    ROCKSDB_NAMESPACE::Options().memtable_veirfy_per_key_checksum_on_seek,
+    "Sets CF option memtable_veirfy_per_key_checksum_on_seek.");
+
 DEFINE_uint32(commit_bypass_memtable_one_in, 0,
               "If greater than zero, transaction option will set "
               "commit_bypass_memtable to per every N transactions on average.");
+
+// Compaction on deletion trigger flags
+DEFINE_bool(enable_compaction_on_deletion_trigger, false,
+            "Enable CompactOnDeletionCollectorFactory for stress testing "
+            "deletion-triggered compaction scenarios.");
+
+DEFINE_uint64(compaction_on_deletion_min_file_size, 32 * 1024,
+              "Minimum file size (in bytes) for deletion-triggered compaction. "
+              "Files smaller than this will not trigger compaction even if "
+              "deletion ratio is exceeded. Default: 32KB");
+
+DEFINE_int32(compaction_on_deletion_trigger_count, 50,
+             "Number of deletions that triggers compaction when deletion "
+             "ratio is exceeded. Default: 50");
+
+DEFINE_int32(compaction_on_deletion_window_size, 100,
+             "Size of the sliding window for tracking deletions. "
+             "Default: 100");
+
+DEFINE_double(compaction_on_deletion_ratio, 0.5,
+              "Deletion ratio threshold for triggering compaction. "
+              "Default: 0.5 (50%)");
 
 DEFINE_bool(
     auto_refresh_iterator_with_snapshot,
     ROCKSDB_NAMESPACE::ReadOptions().auto_refresh_iterator_with_snapshot,
     "ReadOptions.auto_refresh_iterator_with_snapshot");
+
+DEFINE_uint32(
+    memtable_op_scan_flush_trigger,
+    ROCKSDB_NAMESPACE::ColumnFamilyOptions().memtable_op_scan_flush_trigger,
+    "Sets CF option memtable_op_scan_flush_trigger.");
+
+DEFINE_uint32(
+    memtable_avg_op_scan_flush_trigger,
+    ROCKSDB_NAMESPACE::ColumnFamilyOptions().memtable_avg_op_scan_flush_trigger,
+    "Sets CF option memtable_avg_op_scan_flush_trigger.");
+
+DEFINE_bool(
+    universal_reduce_file_locking,
+    ROCKSDB_NAMESPACE::ColumnFamilyOptions()
+        .compaction_options_universal.reduce_file_locking,
+    "Sets "
+    "ColumnFamilyOptions().compaciton_options_universal.reduce_file_locking.");
+
+DEFINE_bool(use_multiscan, false,
+            "If set, use the batched MultiScan API for scans.");
+
+DEFINE_bool(multiscan_use_async_io, false,
+            "If set, enable async_io for MultiScan operations.");
 
 #endif  // GFLAGS

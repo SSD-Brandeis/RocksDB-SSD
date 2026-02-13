@@ -124,14 +124,11 @@ Compaction* FIFOCompactionPicker::PickTTLCompaction(
   Compaction* c = new Compaction(
       vstorage, ioptions_, mutable_cf_options, mutable_db_options,
       std::move(inputs), 0, 0, 0, 0, kNoCompression,
-      mutable_cf_options.compression_opts,
-      mutable_cf_options.default_write_temperature,
+      mutable_cf_options.compression_opts, Temperature::kUnknown,
       /* max_subcompactions */ 0, {}, /* earliest_snapshot */ std::nullopt,
-      /* snapshot_checker */ nullptr,
-      /* is manual */ false,
+      /* snapshot_checker */ nullptr, CompactionReason::kFIFOTtl,
       /* trim_ts */ "", vstorage->CompactionScore(0),
-      /* is deletion compaction */ true, /* l0_files_might_overlap */ true,
-      CompactionReason::kFIFOTtl);
+      /* l0_files_might_overlap */ true);
   return c;
 }
 
@@ -196,15 +193,13 @@ Compaction* FIFOCompactionPicker::PickSizeCompaction(
             {comp_inputs}, 0, 16 * 1024 * 1024 /* output file size limit */,
             0 /* max compaction bytes, not applicable */,
             0 /* output path ID */, mutable_cf_options.compression,
-            mutable_cf_options.compression_opts,
-            mutable_cf_options.default_write_temperature,
+            mutable_cf_options.compression_opts, Temperature::kUnknown,
             0 /* max_subcompactions */, {},
             /* earliest_snapshot */ std::nullopt,
-            /* snapshot_checker */ nullptr, /* is manual */ false,
+            /* snapshot_checker */ nullptr,
+            CompactionReason::kFIFOReduceNumFiles,
             /* trim_ts */ "", vstorage->CompactionScore(0),
-            /* is deletion compaction */ false,
-            /* l0_files_might_overlap */ true,
-            CompactionReason::kFIFOReduceNumFiles);
+            /* l0_files_might_overlap */ true);
         return c;
       }
     }
@@ -261,6 +256,9 @@ Compaction* FIFOCompactionPicker::PickSizeCompaction(
     // better serves a major type of FIFO use cases where smaller keys are
     // associated with older data.
     for (const auto& f : last_level_files) {
+      if (f->being_compacted) {
+        continue;
+      }
       total_size -= f->fd.file_size;
       inputs[0].files.push_back(f);
       char tmp_fsize[16];
@@ -294,14 +292,11 @@ Compaction* FIFOCompactionPicker::PickSizeCompaction(
       /* target_file_size */ 0,
       /* max_compaction_bytes */ 0,
       /* output_path_id */ 0, kNoCompression,
-      mutable_cf_options.compression_opts,
-      mutable_cf_options.default_write_temperature,
+      mutable_cf_options.compression_opts, Temperature::kUnknown,
       /* max_subcompactions */ 0, {}, /* earliest_snapshot */ std::nullopt,
-      /* snapshot_checker */ nullptr,
-      /* is manual */ false,
+      /* snapshot_checker */ nullptr, CompactionReason::kFIFOMaxSize,
       /* trim_ts */ "", vstorage->CompactionScore(0),
-      /* is deletion compaction */ true,
-      /* l0_files_might_overlap */ true, CompactionReason::kFIFOMaxSize);
+      /* l0_files_might_overlap */ true);
   return c;
 }
 
@@ -392,12 +387,14 @@ Compaction* FIFOCompactionPicker::PickTemperatureChangeCompaction(
       assert(compaction_target_temp == Temperature::kLastTemperature);
       compaction_target_temp = cur_target_temp;
       inputs[0].files.push_back(cur_file);
-      ROCKS_LOG_BUFFER(
-          log_buffer,
-          "[%s] FIFO compaction: picking file %" PRIu64
-          " with estimated newest key time %" PRIu64 " for temperature %s.",
-          cf_name.c_str(), cur_file->fd.GetNumber(), est_newest_key_time,
-          temperature_to_string[cur_target_temp].c_str());
+      ROCKS_LOG_BUFFER(log_buffer,
+                       "[%s] FIFO compaction: picking file %" PRIu64
+                       " with estimated newest key time %" PRIu64
+                       " and temperature %s for temperature %s.",
+                       cf_name.c_str(), cur_file->fd.GetNumber(),
+                       est_newest_key_time,
+                       temperature_to_string[cur_file->temperature].c_str(),
+                       temperature_to_string[cur_target_temp].c_str());
       break;
     }
   }
@@ -416,19 +413,25 @@ Compaction* FIFOCompactionPicker::PickTemperatureChangeCompaction(
       mutable_cf_options.compression, mutable_cf_options.compression_opts,
       compaction_target_temp,
       /* max_subcompactions */ 0, {}, /* earliest_snapshot */ std::nullopt,
-      /* snapshot_checker */ nullptr,
-      /* is manual */ false, /* trim_ts */ "", vstorage->CompactionScore(0),
-      /* is deletion compaction */ false, /* l0_files_might_overlap */ true,
-      CompactionReason::kChangeTemperature);
+      /* snapshot_checker */ nullptr, CompactionReason::kChangeTemperature,
+      /* trim_ts */ "", vstorage->CompactionScore(0),
+      /* l0_files_might_overlap */ true);
   return c;
 }
 
+// The full_history_ts_low parameter is used to control bottommost file marking
+// for compaction when user-defined timestamps (UDT) are enabled.
+
+// TODO leverage full_history_ts_low for FIFO compaction, by trigggerring
+// compaction early for data that has already expired to achieve the goal of TTL
+// enforced compliance.
 Compaction* FIFOCompactionPicker::PickCompaction(
     const std::string& cf_name, const MutableCFOptions& mutable_cf_options,
     const MutableDBOptions& mutable_db_options,
     const std::vector<SequenceNumber>& /* existing_snapshots */,
     const SnapshotChecker* /* snapshot_checker */, VersionStorageInfo* vstorage,
-    LogBuffer* log_buffer, uint64_t /*memtable_id*/) {
+    LogBuffer* log_buffer, const std::string& /* full_history_ts_low */,
+    bool /* require_max_output_level*/, uint64_t /*memtable_id*/) {
   Compaction* c = nullptr;
   if (mutable_cf_options.ttl > 0) {
     c = PickTTLCompaction(cf_name, mutable_cf_options, mutable_db_options,
@@ -446,14 +449,15 @@ Compaction* FIFOCompactionPicker::PickCompaction(
   return c;
 }
 
-Compaction* FIFOCompactionPicker::CompactRange(
+Compaction* FIFOCompactionPicker::PickCompactionForCompactRange(
     const std::string& cf_name, const MutableCFOptions& mutable_cf_options,
     const MutableDBOptions& mutable_db_options, VersionStorageInfo* vstorage,
     int input_level, int output_level,
     const CompactRangeOptions& /*compact_range_options*/,
     const InternalKey* /*begin*/, const InternalKey* /*end*/,
     InternalKey** compaction_end, bool* /*manual_conflict*/,
-    uint64_t /*max_file_num_to_ignore*/, const std::string& /*trim_ts*/) {
+    uint64_t /*max_file_num_to_ignore*/, const std::string& /*trim_ts*/,
+    const std::string& full_history_ts_low) {
 #ifdef NDEBUG
   (void)input_level;
   (void)output_level;
@@ -462,10 +466,10 @@ Compaction* FIFOCompactionPicker::CompactRange(
   assert(output_level == 0);
   *compaction_end = nullptr;
   LogBuffer log_buffer(InfoLogLevel::INFO_LEVEL, ioptions_.logger);
-  Compaction* c =
-      PickCompaction(cf_name, mutable_cf_options, mutable_db_options,
-                     /*existing_snapshots*/ {}, /*snapshot_checker*/ nullptr,
-                     vstorage, &log_buffer);
+  Compaction* c = PickCompaction(
+      cf_name, mutable_cf_options, mutable_db_options,
+      /*existing_snapshots*/ {}, /*snapshot_checker*/ nullptr, vstorage,
+      &log_buffer, full_history_ts_low, /* require_max_output_level */ false);
   log_buffer.FlushBufferToLog();
   return c;
 }

@@ -47,7 +47,6 @@ class DBFileDumperCommand : public LDBCommand {
 
  private:
   bool decode_blob_index_;
-  bool dump_uncompressed_blobs_;
 };
 
 class DBLiveFilesMetadataDumperCommand : public LDBCommand {
@@ -109,7 +108,6 @@ class DBDumperCommand : public LDBCommand {
   bool print_stats_;
   std::string path_;
   bool decode_blob_index_;
-  bool dump_uncompressed_blobs_;
 
   static const std::string ARG_COUNT_ONLY;
   static const std::string ARG_COUNT_DELIM;
@@ -812,6 +810,27 @@ class UnsafeRemoveSstFileCommand : public LDBCommand {
 
  private:
   uint64_t sst_file_number_;
+};
+
+class CompactionProgressDumpCommand : public LDBCommand {
+ public:
+  static std::string Name() { return "compaction_progress_dump"; }
+
+  CompactionProgressDumpCommand(
+      const std::vector<std::string>& params,
+      const std::map<std::string, std::string>& options,
+      const std::vector<std::string>& flags);
+
+  static void Help(std::string& ret);
+
+  void DoCommand() override;
+
+  bool NoDBOpen() override { return true; }
+
+ private:
+  std::string path_;
+
+  static const std::string ARG_PATH;
 };
 
 }  // namespace ROCKSDB_NAMESPACE

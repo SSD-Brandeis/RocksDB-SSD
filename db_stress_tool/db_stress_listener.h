@@ -9,6 +9,7 @@
 #include <mutex>
 #include <unordered_set>
 
+#include "db_stress_tool/db_stress_compaction_service.h"
 #include "db_stress_tool/db_stress_shared_state.h"
 #include "file/filename.h"
 #include "file/writable_file_writer.h"
@@ -21,7 +22,6 @@
 #include "util/gflags_compat.h"
 #include "util/random.h"
 #include "utilities/fault_injection_fs.h"
-
 DECLARE_int32(compact_files_one_in);
 
 extern std::shared_ptr<ROCKSDB_NAMESPACE::FaultInjectionTestFS> fault_fs_guard;
@@ -265,7 +265,7 @@ class DbStressListener : public EventListener {
       fault_fs_guard->DisableAllThreadLocalErrorInjection();
       // TODO(hx235): only exempt the flush thread during error recovery instead
       // of all the flush threads from error injection
-      fault_fs_guard->SetIOActivtiesExcludedFromFaultInjection(
+      fault_fs_guard->SetIOActivitiesExcludedFromFaultInjection(
           {Env::IOActivity::kFlush});
     }
   }
@@ -275,7 +275,7 @@ class DbStressListener : public EventListener {
     RandomSleep();
     if (FLAGS_error_recovery_with_no_fault_injection && fault_fs_guard) {
       fault_fs_guard->EnableAllThreadLocalErrorInjection();
-      fault_fs_guard->SetIOActivtiesExcludedFromFaultInjection({});
+      fault_fs_guard->SetIOActivitiesExcludedFromFaultInjection({});
     }
   }
 
@@ -309,6 +309,11 @@ class DbStressListener : public EventListener {
           return;
         }
       }
+    }
+    // We can't do exact matching since remote workers use dynamic temp paths
+    if (file_dir.find(DbStressCompactionService::kTempOutputDirectoryPrefix) !=
+        std::string::npos) {
+      return;
     }
     assert(false);
 #else

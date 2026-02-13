@@ -43,8 +43,6 @@ AdvancedColumnFamilyOptions::AdvancedColumnFamilyOptions(const Options& options)
     : max_write_buffer_number(options.max_write_buffer_number),
       min_write_buffer_number_to_merge(
           options.min_write_buffer_number_to_merge),
-      max_write_buffer_number_to_maintain(
-          options.max_write_buffer_number_to_maintain),
       max_write_buffer_size_to_maintain(
           options.max_write_buffer_size_to_maintain),
       inplace_update_support(options.inplace_update_support),
@@ -65,6 +63,7 @@ AdvancedColumnFamilyOptions::AdvancedColumnFamilyOptions(const Options& options)
       level0_stop_writes_trigger(options.level0_stop_writes_trigger),
       target_file_size_base(options.target_file_size_base),
       target_file_size_multiplier(options.target_file_size_multiplier),
+      target_file_size_is_upper_bound(options.target_file_size_is_upper_bound),
       level_compaction_dynamic_level_bytes(
           options.level_compaction_dynamic_level_bytes),
       max_bytes_for_level_multiplier(options.max_bytes_for_level_multiplier),
@@ -90,6 +89,7 @@ AdvancedColumnFamilyOptions::AdvancedColumnFamilyOptions(const Options& options)
       paranoid_file_checks(options.paranoid_file_checks),
       force_consistency_checks(options.force_consistency_checks),
       report_bg_io_stats(options.report_bg_io_stats),
+      disallow_memtable_writes(options.disallow_memtable_writes),
       ttl(options.ttl),
       periodic_compaction_seconds(options.periodic_compaction_seconds),
       sample_for_compression(options.sample_for_compression),
@@ -115,6 +115,9 @@ AdvancedColumnFamilyOptions::AdvancedColumnFamilyOptions(const Options& options)
       persist_user_defined_timestamps(options.persist_user_defined_timestamps),
       level_compaction_granularity(options.level_compaction_granularity),
       fluidlsm_policy(options.fluidlsm_policy) {
+      memtable_op_scan_flush_trigger(options.memtable_op_scan_flush_trigger),
+      memtable_avg_op_scan_flush_trigger(
+          options.memtable_avg_op_scan_flush_trigger) {
   assert(memtable_factory.get() != nullptr);
   if (max_bytes_for_level_multiplier_additional.size() <
       static_cast<unsigned int>(num_levels)) {
@@ -193,8 +196,6 @@ void ColumnFamilyOptions::Dump(Logger* log) const {
   ROCKS_LOG_HEADER(log, "            Options.num_levels: %d", num_levels);
   ROCKS_LOG_HEADER(log, "       Options.min_write_buffer_number_to_merge: %d",
                    min_write_buffer_number_to_merge);
-  ROCKS_LOG_HEADER(log, "    Options.max_write_buffer_number_to_maintain: %d",
-                   max_write_buffer_number_to_maintain);
   ROCKS_LOG_HEADER(log,
                    "    Options.max_write_buffer_size_to_maintain: %" PRIu64,
                    max_write_buffer_size_to_maintain);
@@ -272,6 +273,9 @@ void ColumnFamilyOptions::Dump(Logger* log) const {
   ROCKS_LOG_HEADER(log, "            Options.target_file_size_multiplier: %d",
                    target_file_size_multiplier);
   ROCKS_LOG_HEADER(log,
+                   "           Options.target_file_size_is_upper_bound: %d",
+                   target_file_size_is_upper_bound);
+  ROCKS_LOG_HEADER(log,
                    "               Options.max_bytes_for_level_base: %" PRIu64,
                    max_bytes_for_level_base);
   ROCKS_LOG_HEADER(log, "Options.level_compaction_dynamic_level_bytes: %d",
@@ -288,6 +292,12 @@ void ColumnFamilyOptions::Dump(Logger* log) const {
   ROCKS_LOG_HEADER(log,
                    "      Options.max_sequential_skip_in_iterations: %" PRIu64,
                    max_sequential_skip_in_iterations);
+  ROCKS_LOG_HEADER(log,
+                   "         Options.memtable_op_scan_flush_trigger: %" PRIu32,
+                   memtable_op_scan_flush_trigger);
+  ROCKS_LOG_HEADER(log,
+                   "     Options.memtable_avg_op_scan_flush_trigger: %" PRIu32,
+                   memtable_avg_op_scan_flush_trigger);
   ROCKS_LOG_HEADER(log,
                    "                   Options.max_compaction_bytes: %" PRIu64,
                    max_compaction_bytes);
@@ -355,6 +365,9 @@ void ColumnFamilyOptions::Dump(Logger* log) const {
   ROCKS_LOG_HEADER(log, "Options.compaction_options_universal.max_read_amp: %d",
                    compaction_options_universal.max_read_amp);
   ROCKS_LOG_HEADER(
+      log, "Options.compaction_options_universal.reduce_file_locking: %d",
+      compaction_options_universal.reduce_file_locking);
+  ROCKS_LOG_HEADER(
       log, "Options.compaction_options_fifo.max_table_files_size: %" PRIu64,
       compaction_options_fifo.max_table_files_size);
   ROCKS_LOG_HEADER(log, "Options.compaction_options_fifo.allow_compaction: %d",
@@ -397,6 +410,8 @@ void ColumnFamilyOptions::Dump(Logger* log) const {
                    force_consistency_checks);
   ROCKS_LOG_HEADER(log, "               Options.report_bg_io_stats: %d",
                    report_bg_io_stats);
+  ROCKS_LOG_HEADER(log, "               Options.disallow_memtable_writes: %d",
+                   disallow_memtable_writes);
   ROCKS_LOG_HEADER(log, "                              Options.ttl: %" PRIu64,
                    ttl);
   ROCKS_LOG_HEADER(log,
@@ -453,6 +468,8 @@ void ColumnFamilyOptions::Dump(Logger* log) const {
                    experimental_mempurge_threshold);
   ROCKS_LOG_HEADER(log, "           Options.memtable_max_range_deletions: %d",
                    memtable_max_range_deletions);
+  ROCKS_LOG_HEADER(log, "                 Options.cf_allow_ingest_behind: %s",
+                   cf_allow_ingest_behind ? "true" : "false");
 }  // ColumnFamilyOptions::Dump
 
 void Options::Dump(Logger* log) const {

@@ -53,12 +53,6 @@ int db_stress_tool(int argc, char** argv) {
     SetupSyncPointsToMockDirectIO();
   }
 #endif
-  if (FLAGS_statistics) {
-    dbstats = ROCKSDB_NAMESPACE::CreateDBStatistics();
-    if (FLAGS_test_secondary) {
-      dbstats_secondaries = ROCKSDB_NAMESPACE::CreateDBStatistics();
-    }
-  }
   compression_type_e = StringToCompressionType(FLAGS_compression_type.c_str());
   bottommost_compression_type_e =
       StringToCompressionType(FLAGS_bottommost_compression_type.c_str());
@@ -103,6 +97,33 @@ int db_stress_tool(int argc, char** argv) {
   env_wrapper_guard = std::make_shared<CompositeEnvWrapper>(
       raw_env, std::make_shared<DbStressFSWrapper>(raw_env->GetFileSystem()));
   db_stress_env = env_wrapper_guard.get();
+
+  // Handle --destroy_db_and_exit early, before other option validation
+  if (FLAGS_destroy_db_and_exit) {
+    s = DbStressDestroyDb(FLAGS_db);
+    if (s.ok()) {
+      fprintf(stdout, "Successfully destroyed db at %s\n", FLAGS_db.c_str());
+      return 0;
+    } else {
+      fprintf(stderr, "Failed to destroy db at %s: %s\n", FLAGS_db.c_str(),
+              s.ToString().c_str());
+      return 1;
+    }
+  }
+
+  // Handle --delete_dir_and_exit early, before other option validation
+  if (!FLAGS_delete_dir_and_exit.empty()) {
+    s = DestroyDir(raw_env, FLAGS_delete_dir_and_exit);
+    if (s.ok()) {
+      fprintf(stdout, "Successfully deleted directory %s\n",
+              FLAGS_delete_dir_and_exit.c_str());
+      return 0;
+    } else {
+      fprintf(stderr, "Failed to delete directory %s: %s\n",
+              FLAGS_delete_dir_and_exit.c_str(), s.ToString().c_str());
+      return 1;
+    }
+  }
 
   FLAGS_rep_factory = StringToRepFactory(FLAGS_memtablerep.c_str());
 

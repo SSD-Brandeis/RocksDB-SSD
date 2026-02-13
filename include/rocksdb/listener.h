@@ -441,6 +441,9 @@ struct CompactionJobInfo {
   // the job id, which is unique in the same thread.
   int job_id;
 
+  // the number of L0 files in the CF right before and after the compaction
+  int num_l0_files;
+
   // the smallest input level of the compaction.
   int base_input_level;
   // the output level of the compaction.
@@ -487,6 +490,9 @@ struct CompactionJobInfo {
   // Information about blob files deleted during compaction in Integrated
   // BlobDB.
   std::vector<BlobFileGarbageInfo> blob_file_garbage_infos;
+
+  // Whether this compaction was aborted via AbortAllCompactions()
+  bool aborted = false;
 };
 
 struct MemTableInfo {

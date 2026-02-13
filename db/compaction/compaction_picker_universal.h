@@ -18,12 +18,16 @@ class UniversalCompactionPicker : public CompactionPicker {
   UniversalCompactionPicker(const ImmutableOptions& ioptions,
                             const InternalKeyComparator* icmp)
       : CompactionPicker(ioptions, icmp) {}
+
+  // If `require_max_output_level` is true, only pick compaction
+  // with max output level or return nullptr if no such compaction exists.
   Compaction* PickCompaction(
       const std::string& cf_name, const MutableCFOptions& mutable_cf_options,
       const MutableDBOptions& mutable_db_options,
       const std::vector<SequenceNumber>& existing_snapshots,
       const SnapshotChecker* snapshot_checker, VersionStorageInfo* vstorage,
-      LogBuffer* log_buffer,
+      LogBuffer* log_buffer, const std::string& full_history_ts_low,
+      bool require_max_output_level = false,
       uint64_t max_memtable_id = std::numeric_limits<uint64_t>::max()) override;
   int MaxOutputLevel() const override { return NumberLevels() - 1; }
 

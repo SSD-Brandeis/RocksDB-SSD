@@ -233,6 +233,13 @@ class NonBatchedOpsStressTest : public StressTest {
           }
 
           Status s = secondary_db_->TryCatchUpWithPrimary();
+#ifndef NDEBUG
+          uint64_t manifest_num = static_cast_with_check<DBImpl>(secondary_db_)
+                                      ->TEST_Current_Manifest_FileNo();
+#else
+          uint64_t manifest_num = 0;
+#endif
+
           if (!s.ok()) {
             VerificationAbort(shared,
                               "Secondary failed to catch up to the primary");
@@ -267,9 +274,11 @@ class NonBatchedOpsStressTest : public StressTest {
             assert(!pre_read_expected_values.empty() &&
                    static_cast<size_t>(i - start) <
                        pre_read_expected_values.size());
-            VerifyValueRange(static_cast<int>(cf), i, options, shared, from_db,
-                             /* msg_prefix */ "Secondary get verification", s,
-                             pre_read_expected_values[i - start]);
+            VerifyValueRange(
+                static_cast<int>(cf), i, options, shared, from_db,
+                /* msg_prefix */ "Secondary get verification, manifest: " +
+                    std::to_string(manifest_num),
+                s, pre_read_expected_values[i - start]);
           }
         }
       } else if (method == VerificationMethod::kGetEntity) {
@@ -1600,12 +1609,6 @@ class NonBatchedOpsStressTest : public StressTest {
     Slice ub_slice;
     ReadOptions ro_copy = read_opts;
 
-    // There is a narrow window in iterator auto refresh run where injected read
-    // errors are simply untraceable, ex. failure to delete file as a part of
-    // superversion cleanup callback invoked by the DBIter destructor.
-    bool ignore_injected_read_error_in_iter =
-        ro_copy.auto_refresh_iterator_with_snapshot;
-
     // Randomly test with `iterate_upper_bound` and `prefix_same_as_start`
     //
     // Get the next prefix first and then see if we want to set it to be the
@@ -1698,8 +1701,7 @@ class NonBatchedOpsStressTest : public StressTest {
               FaultInjectionIOType::kRead),
           fault_fs_guard->GetAndResetInjectedThreadLocalErrorCount(
               FaultInjectionIOType::kMetadataRead));
-      if (!ignore_injected_read_error_in_iter &&
-          !SharedState::ignore_read_error && injected_error_count > 0 &&
+      if (!SharedState::ignore_read_error && injected_error_count > 0 &&
           s.ok()) {
         // Grab mutex so multiple thread don't try to print the
         // stack trace at the same time
@@ -1852,7 +1854,17 @@ class NonBatchedOpsStressTest : public StressTest {
       } else if (FLAGS_use_merge) {
         if (!FLAGS_use_txn) {
           if (FLAGS_user_timestamp_size == 0) {
-            s = db_->Merge(write_opts, cfh, k, v);
+            if (FLAGS_ingest_wbwi_one_in &&
+                thread->rand.OneIn(FLAGS_ingest_wbwi_one_in)) {
+              auto wbwi = std::make_shared<WriteBatchWithIndex>(
+                  options_.comparator, 0, /*overwrite_key=*/true);
+              s = wbwi->Merge(cfh, k, v);
+              if (s.ok()) {
+                s = db_->IngestWriteBatchWithIndex(write_opts, wbwi);
+              }
+            } else {
+              s = db_->Merge(write_opts, cfh, k, v);
+            }
           } else {
             s = db_->Merge(write_opts, cfh, k, write_ts, v);
           }
@@ -1864,7 +1876,17 @@ class NonBatchedOpsStressTest : public StressTest {
       } else {
         if (!FLAGS_use_txn) {
           if (FLAGS_user_timestamp_size == 0) {
-            s = db_->Put(write_opts, cfh, k, v);
+            if (FLAGS_ingest_wbwi_one_in &&
+                thread->rand.OneIn(FLAGS_ingest_wbwi_one_in)) {
+              auto wbwi = std::make_shared<WriteBatchWithIndex>(
+                  options_.comparator, 0, /*overwrite_key=*/true);
+              s = wbwi->Put(cfh, k, v);
+              if (s.ok()) {
+                s = db_->IngestWriteBatchWithIndex(write_opts, wbwi);
+              }
+            } else {
+              s = db_->Put(write_opts, cfh, k, v);
+            }
           } else {
             s = db_->Put(write_opts, cfh, k, write_ts, v);
           }
@@ -1881,6 +1903,17 @@ class NonBatchedOpsStressTest : public StressTest {
 
     } while (!s.ok() && IsErrorInjectedAndRetryable(s) &&
              initial_wal_write_may_succeed);
+
+    if ((s.IsDeadlock() || s.IsTimedOut()) &&
+        (FLAGS_use_multiget || FLAGS_use_multi_get_entity)) {
+      // Deadlock or timeout is ok, when multi get is tested. Because multi get
+      // tests execute MaybeAddKeyToTxnForRYW function which writes to the
+      // same key space but does not acquire stress test level mutex. So it is
+      // possible RocksDB returns deadlock or timeout. Return OK() for these
+      // cases
+      pending_expected_value.Rollback();
+      return Status::OK();
+    }
 
     if (!s.ok()) {
       pending_expected_value.Rollback();
@@ -1956,7 +1989,17 @@ class NonBatchedOpsStressTest : public StressTest {
         }
         if (!FLAGS_use_txn) {
           if (FLAGS_user_timestamp_size == 0) {
-            s = db_->Delete(write_opts, cfh, key);
+            if (FLAGS_ingest_wbwi_one_in &&
+                thread->rand.OneIn(FLAGS_ingest_wbwi_one_in)) {
+              auto wbwi = std::make_shared<WriteBatchWithIndex>(
+                  options_.comparator, 0, /*overwrite_key=*/true);
+              s = wbwi->Delete(cfh, key);
+              if (s.ok()) {
+                s = db_->IngestWriteBatchWithIndex(write_opts, wbwi);
+              }
+            } else {
+              s = db_->Delete(write_opts, cfh, key);
+            }
           } else {
             s = db_->Delete(write_opts, cfh, key, write_ts);
           }
@@ -2013,7 +2056,17 @@ class NonBatchedOpsStressTest : public StressTest {
         }
         if (!FLAGS_use_txn) {
           if (FLAGS_user_timestamp_size == 0) {
-            s = db_->SingleDelete(write_opts, cfh, key);
+            if (FLAGS_ingest_wbwi_one_in &&
+                thread->rand.OneIn(FLAGS_ingest_wbwi_one_in)) {
+              auto wbwi = std::make_shared<WriteBatchWithIndex>(
+                  options_.comparator, 0, /*overwrite_key=*/true);
+              s = wbwi->SingleDelete(cfh, key);
+              if (s.ok()) {
+                s = db_->IngestWriteBatchWithIndex(write_opts, wbwi);
+              }
+            } else {
+              s = db_->SingleDelete(write_opts, cfh, key);
+            }
           } else {
             s = db_->SingleDelete(write_opts, cfh, key, write_ts);
           }
@@ -3114,13 +3167,15 @@ class NonBatchedOpsStressTest : public StressTest {
 
       Status s;
 
+      ExpectedValue new_expected_value;
+
       switch (op) {
         case Op::PutOrPutEntity:
         case Op::Merge: {
           ExpectedValue put_value;
           put_value.SyncPut(static_cast<uint32_t>(thread->rand.Uniform(
               static_cast<int>(ExpectedValue::GetValueBaseMask()))));
-          ryw_expected_values[k] = put_value;
+          new_expected_value = put_value;
 
           const uint32_t value_base = put_value.GetValueBase();
 
@@ -3144,7 +3199,7 @@ class NonBatchedOpsStressTest : public StressTest {
         case Op::Delete: {
           ExpectedValue delete_value;
           delete_value.SyncDelete();
-          ryw_expected_values[k] = delete_value;
+          new_expected_value = delete_value;
 
           s = txn->Delete(cfh, k);
           break;
@@ -3152,6 +3207,20 @@ class NonBatchedOpsStressTest : public StressTest {
         default:
           assert(false);
       }
+
+      // It is possible that multiple thread concurrently try to write to the
+      // same key, which could cause lock timeout or deadlock in the
+      // transactiondb layer, before transaction is rolled back.
+      // E.g.
+      // Timestamp 1: Transaction A: lock key M for write
+      // Timestamp 2: Transaction B: lock key N for write
+      // Timestamp 3: Transaction B: try to lock key M for write -> wait
+      // Timestamp 4: Transaction A: try to lock key N for write -> deadlock
+      if (s.IsTimedOut() || s.IsDeadlock()) {
+        return;
+      }
+
+      ryw_expected_values[k] = new_expected_value;
 
       if (!s.ok()) {
         fprintf(stderr,

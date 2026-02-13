@@ -100,13 +100,14 @@ DECLARE_bool(enable_pipelined_write);
 DECLARE_bool(verify_before_write);
 DECLARE_bool(histogram);
 DECLARE_bool(destroy_db_initially);
+DECLARE_bool(destroy_db_and_exit);
+DECLARE_string(delete_dir_and_exit);
 DECLARE_bool(verbose);
 DECLARE_bool(progress_reports);
 DECLARE_uint64(db_write_buffer_size);
 DECLARE_int32(write_buffer_size);
 DECLARE_int32(max_write_buffer_number);
 DECLARE_int32(min_write_buffer_number_to_merge);
-DECLARE_int32(max_write_buffer_number_to_maintain);
 DECLARE_int64(max_write_buffer_size_to_maintain);
 DECLARE_bool(use_write_buffer_manager);
 DECLARE_double(memtable_prefix_bloom_size_ratio);
@@ -218,6 +219,7 @@ DECLARE_int32(reset_stats_one_in);
 DECLARE_int32(pause_background_one_in);
 DECLARE_int32(disable_file_deletions_one_in);
 DECLARE_int32(disable_manual_compaction_one_in);
+DECLARE_int32(abort_and_resume_compactions_one_in);
 DECLARE_int32(compact_range_width);
 DECLARE_int32(acquire_snapshot_one_in);
 DECLARE_bool(compare_full_db_state_snapshot);
@@ -249,6 +251,7 @@ DECLARE_string(fs_uri);
 DECLARE_uint64(ops_per_thread);
 DECLARE_uint64(log2_keys_per_lock);
 DECLARE_uint64(max_manifest_file_size);
+DECLARE_int32(max_manifest_space_amp_pct);
 DECLARE_bool(in_place_update);
 DECLARE_string(memtablerep);
 DECLARE_int32(prefix_size);
@@ -276,6 +279,7 @@ DECLARE_string(last_level_temperature);
 DECLARE_string(default_write_temperature);
 DECLARE_string(default_temperature);
 DECLARE_bool(paranoid_memory_checks);
+DECLARE_bool(memtable_veirfy_per_key_checksum_on_seek);
 
 // Options for transaction dbs.
 // Use TransactionDB (a.k.a. Pessimistic Transaction DB)
@@ -285,6 +289,7 @@ DECLARE_bool(use_txn);
 // Options for TransactionDB (a.k.a. Pessimistic Transaction DB)
 DECLARE_uint64(txn_write_policy);
 DECLARE_bool(unordered_write);
+DECLARE_bool(use_per_key_point_lock_mgr);
 
 // Options for OptimisticTransactionDB
 DECLARE_bool(use_optimistic_txn);
@@ -294,11 +299,8 @@ DECLARE_uint32(occ_lock_bucket_count);
 
 // Options for StackableDB-based BlobDB
 DECLARE_bool(use_blob_db);
-DECLARE_uint64(blob_db_min_blob_size);
-DECLARE_uint64(blob_db_bytes_per_sync);
 DECLARE_uint64(blob_db_file_size);
 DECLARE_bool(blob_db_enable_gc);
-DECLARE_double(blob_db_gc_cutoff);
 
 // Options for integrated BlobDB
 DECLARE_bool(allow_setting_blob_options_dynamically);
@@ -321,7 +323,6 @@ DECLARE_int32(approximate_size_one_in);
 DECLARE_bool(best_efforts_recovery);
 DECLARE_bool(skip_verifydb);
 DECLARE_bool(paranoid_file_checks);
-DECLARE_bool(fail_if_options_file_error);
 DECLARE_uint64(batch_protection_bytes_per_key);
 DECLARE_uint32(memtable_protection_bytes_per_key);
 DECLARE_uint32(block_protection_bytes_per_key);
@@ -397,9 +398,9 @@ DECLARE_bool(enable_index_compression);
 DECLARE_uint32(index_shortening);
 DECLARE_uint32(metadata_charge_policy);
 DECLARE_bool(use_adaptive_mutex_lru);
-DECLARE_uint32(compress_format_version);
 DECLARE_uint64(manifest_preallocation_size);
 DECLARE_bool(enable_checksum_handoff);
+DECLARE_string(compression_manager);
 DECLARE_uint64(max_total_wal_size);
 DECLARE_double(high_pri_pool_ratio);
 DECLARE_double(low_pri_pool_ratio);
@@ -409,6 +410,8 @@ DECLARE_uint64(max_sequential_skip_in_iterations);
 DECLARE_bool(enable_sst_partitioner_factory);
 DECLARE_bool(enable_do_not_compress_roles);
 DECLARE_bool(block_align);
+DECLARE_uint64(super_block_alignment_size);
+DECLARE_uint64(super_block_alignment_space_overhead_ratio);
 DECLARE_uint32(lowest_used_cache_tier);
 DECLARE_bool(enable_custom_split_merge);
 DECLARE_uint32(adm_policy);
@@ -420,10 +423,27 @@ DECLARE_uint32(uncache_aggressiveness);
 DECLARE_int32(test_ingest_standalone_range_deletion_one_in);
 DECLARE_bool(allow_unprepared_value);
 DECLARE_string(file_temperature_age_thresholds);
+DECLARE_bool(allow_trivial_copy_when_change_temperature);
 DECLARE_uint32(commit_bypass_memtable_one_in);
 DECLARE_bool(track_and_verify_wals);
-DECLARE_bool(enable_remote_compaction);
+DECLARE_int32(remote_compaction_worker_threads);
+DECLARE_int32(remote_compaction_worker_interval);
+DECLARE_bool(remote_compaction_failure_fall_back_to_local);
+DECLARE_int32(allow_resumption_one_in);
 DECLARE_bool(auto_refresh_iterator_with_snapshot);
+DECLARE_uint32(memtable_op_scan_flush_trigger);
+DECLARE_uint32(memtable_avg_op_scan_flush_trigger);
+DECLARE_uint32(ingest_wbwi_one_in);
+DECLARE_bool(universal_reduce_file_locking);
+DECLARE_bool(use_multiscan);
+DECLARE_bool(multiscan_use_async_io);
+
+// Compaction deletion trigger declarations for stress testing
+DECLARE_bool(enable_compaction_on_deletion_trigger);
+DECLARE_uint64(compaction_on_deletion_min_file_size);
+DECLARE_int32(compaction_on_deletion_trigger_count);
+DECLARE_int32(compaction_on_deletion_window_size);
+DECLARE_double(compaction_on_deletion_ratio);
 
 constexpr long KB = 1024;
 constexpr int kRandomValueMaxFactor = 3;
@@ -751,6 +771,8 @@ void PoolSizeChangeThread(void* v);
 
 void DbVerificationThread(void* v);
 
+void RemoteCompactionWorkerThread(void* v);
+
 void CompressedCacheSetCapacityThread(void* v);
 
 void TimestampedSnapshotsThread(void* v);
@@ -797,5 +819,10 @@ Status SaveFilesInDirectory(const std::string& src_dirname,
                             const std::string& dst_dirname);
 Status DestroyUnverifiedSubdir(const std::string& dirname);
 Status InitUnverifiedSubdir(const std::string& dirname);
+
+// Destroy the DB at the given path under the env configured for db_stress.
+// Handles both regular DB and BlobDB, and cleans and removes the entire dir.
+Status DbStressDestroyDb(const std::string& db_path);
+
 }  // namespace ROCKSDB_NAMESPACE
 #endif  // GFLAGS

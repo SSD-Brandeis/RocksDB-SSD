@@ -5101,9 +5101,9 @@ class TickerTypeJni {
         return -0x1;
       case ROCKSDB_NAMESPACE::Tickers::BLOB_DB_BYTES_READ:
         return -0x2;
-      case ROCKSDB_NAMESPACE::Tickers::BLOB_DB_WRITE_INLINED:
+      case ROCKSDB_NAMESPACE::Tickers::BLOB_DB_WRITE_INLINED_DEPRECATED:
         return -0x3;
-      case ROCKSDB_NAMESPACE::Tickers::BLOB_DB_WRITE_INLINED_TTL:
+      case ROCKSDB_NAMESPACE::Tickers::BLOB_DB_WRITE_INLINED_TTL_DEPRECATED:
         return -0x4;
       case ROCKSDB_NAMESPACE::Tickers::BLOB_DB_WRITE_BLOB:
         return -0x5;
@@ -5195,6 +5195,8 @@ class TickerTypeJni {
         return -0x2F;
       case ROCKSDB_NAMESPACE::Tickers::REMOTE_COMPACT_WRITE_BYTES:
         return -0x30;
+      case ROCKSDB_NAMESPACE::Tickers::REMOTE_COMPACT_RESUMED_BYTES:
+        return -0x5F;
       case ROCKSDB_NAMESPACE::Tickers::HOT_FILE_READ_BYTES:
         return -0x31;
       case ROCKSDB_NAMESPACE::Tickers::WARM_FILE_READ_BYTES:
@@ -5273,6 +5275,38 @@ class TickerTypeJni {
         return -0x56;
       case ROCKSDB_NAMESPACE::Tickers::FILE_READ_CORRUPTION_RETRY_SUCCESS_COUNT:
         return -0x57;
+      case ROCKSDB_NAMESPACE::Tickers::FIFO_CHANGE_TEMPERATURE_COMPACTIONS:
+        return -0x58;
+      case ROCKSDB_NAMESPACE::Tickers::ICE_FILE_READ_BYTES:
+        return -0x59;
+      case ROCKSDB_NAMESPACE::Tickers::ICE_FILE_READ_COUNT:
+        return -0x5A;
+      case ROCKSDB_NAMESPACE::Tickers::COOL_FILE_READ_BYTES:
+        return -0x5B;
+      case ROCKSDB_NAMESPACE::Tickers::COOL_FILE_READ_COUNT:
+        return -0x5C;
+      case ROCKSDB_NAMESPACE::Tickers::NUMBER_WBWI_INGEST:
+        return -0x5D;
+      case ROCKSDB_NAMESPACE::Tickers::SST_USER_DEFINED_INDEX_LOAD_FAIL_COUNT:
+        return -0x5E;
+      case ROCKSDB_NAMESPACE::Tickers::MULTISCAN_PREPARE_CALLS:
+        return -0x60;
+      case ROCKSDB_NAMESPACE::Tickers::MULTISCAN_PREPARE_ERRORS:
+        return -0x61;
+      case ROCKSDB_NAMESPACE::Tickers::MULTISCAN_BLOCKS_PREFETCHED:
+        return -0x62;
+      case ROCKSDB_NAMESPACE::Tickers::MULTISCAN_BLOCKS_FROM_CACHE:
+        return -0x63;
+      case ROCKSDB_NAMESPACE::Tickers::MULTISCAN_PREFETCH_BYTES:
+        return -0x64;
+      case ROCKSDB_NAMESPACE::Tickers::MULTISCAN_PREFETCH_BLOCKS_WASTED:
+        return -0x65;
+      case ROCKSDB_NAMESPACE::Tickers::MULTISCAN_IO_REQUESTS:
+        return -0x66;
+      case ROCKSDB_NAMESPACE::Tickers::MULTISCAN_IO_COALESCED_NONADJACENT:
+        return -0x67;
+      case ROCKSDB_NAMESPACE::Tickers::MULTISCAN_SEEK_ERRORS:
+        return -0x68;
       case ROCKSDB_NAMESPACE::Tickers::TICKER_ENUM_MAX:
         // -0x54 is the max value at this time. Since these values are exposed
         // directly to Java clients, we'll keep the value the same till the next
@@ -5560,9 +5594,9 @@ class TickerTypeJni {
       case -0x2:
         return ROCKSDB_NAMESPACE::Tickers::BLOB_DB_BYTES_READ;
       case -0x3:
-        return ROCKSDB_NAMESPACE::Tickers::BLOB_DB_WRITE_INLINED;
+        return ROCKSDB_NAMESPACE::Tickers::BLOB_DB_WRITE_INLINED_DEPRECATED;
       case -0x4:
-        return ROCKSDB_NAMESPACE::Tickers::BLOB_DB_WRITE_INLINED_TTL;
+        return ROCKSDB_NAMESPACE::Tickers::BLOB_DB_WRITE_INLINED_TTL_DEPRECATED;
       case -0x5:
         return ROCKSDB_NAMESPACE::Tickers::BLOB_DB_WRITE_BLOB;
       case -0x6:
@@ -5654,6 +5688,8 @@ class TickerTypeJni {
         return ROCKSDB_NAMESPACE::Tickers::REMOTE_COMPACT_READ_BYTES;
       case -0x30:
         return ROCKSDB_NAMESPACE::Tickers::REMOTE_COMPACT_WRITE_BYTES;
+      case -0x5F:
+        return ROCKSDB_NAMESPACE::Tickers::REMOTE_COMPACT_RESUMED_BYTES;
       case -0x31:
         return ROCKSDB_NAMESPACE::Tickers::HOT_FILE_READ_BYTES;
       case -0x32:
@@ -5735,6 +5771,39 @@ class TickerTypeJni {
       case -0x57:
         return ROCKSDB_NAMESPACE::Tickers::
             FILE_READ_CORRUPTION_RETRY_SUCCESS_COUNT;
+      case -0x58:
+        return ROCKSDB_NAMESPACE::Tickers::FIFO_CHANGE_TEMPERATURE_COMPACTIONS;
+      case -0x59:
+        return ROCKSDB_NAMESPACE::Tickers::ICE_FILE_READ_BYTES;
+      case -0x5A:
+        return ROCKSDB_NAMESPACE::Tickers::ICE_FILE_READ_COUNT;
+      case -0x5B:
+        return ROCKSDB_NAMESPACE::Tickers::COOL_FILE_READ_BYTES;
+      case -0x5C:
+        return ROCKSDB_NAMESPACE::Tickers::COOL_FILE_READ_COUNT;
+      case -0x5D:
+        return ROCKSDB_NAMESPACE::Tickers::NUMBER_WBWI_INGEST;
+      case -0x5E:
+        return ROCKSDB_NAMESPACE::Tickers::
+            SST_USER_DEFINED_INDEX_LOAD_FAIL_COUNT;
+      case -0x60:
+        return ROCKSDB_NAMESPACE::Tickers::MULTISCAN_PREPARE_CALLS;
+      case -0x61:
+        return ROCKSDB_NAMESPACE::Tickers::MULTISCAN_PREPARE_ERRORS;
+      case -0x62:
+        return ROCKSDB_NAMESPACE::Tickers::MULTISCAN_BLOCKS_PREFETCHED;
+      case -0x63:
+        return ROCKSDB_NAMESPACE::Tickers::MULTISCAN_BLOCKS_FROM_CACHE;
+      case -0x64:
+        return ROCKSDB_NAMESPACE::Tickers::MULTISCAN_PREFETCH_BYTES;
+      case -0x65:
+        return ROCKSDB_NAMESPACE::Tickers::MULTISCAN_PREFETCH_BLOCKS_WASTED;
+      case -0x66:
+        return ROCKSDB_NAMESPACE::Tickers::MULTISCAN_IO_REQUESTS;
+      case -0x67:
+        return ROCKSDB_NAMESPACE::Tickers::MULTISCAN_IO_COALESCED_NONADJACENT;
+      case -0x68:
+        return ROCKSDB_NAMESPACE::Tickers::MULTISCAN_SEEK_ERRORS;
       case -0x54:
         // -0x54 is the max value at this time. Since these values are exposed
         // directly to Java clients, we'll keep the value the same till the next
@@ -5889,8 +5958,15 @@ class HistogramTypeJni {
         return 0x3C;
       case ROCKSDB_NAMESPACE::Histograms::TABLE_OPEN_PREFETCH_TAIL_READ_BYTES:
         return 0x3D;
+      case ROCKSDB_NAMESPACE::Histograms::COMPACTION_PREFETCH_BYTES:
+        return 0x3F;
+      case ROCKSDB_NAMESPACE::Histograms::MULTISCAN_PREPARE_MICROS:
+        return 0x40;
+      case ROCKSDB_NAMESPACE::Histograms::MULTISCAN_BLOCKS_PER_PREPARE:
+        return 0x41;
       case ROCKSDB_NAMESPACE::Histograms::HISTOGRAM_ENUM_MAX:
-        // 0x3D for backwards compatibility on current minor version.
+        // 0x3E is reserved for backwards compatibility on current minor
+        // version.
         return 0x3E;
       default:
         // undefined/default
@@ -6033,8 +6109,15 @@ class HistogramTypeJni {
       case 0x3D:
         return ROCKSDB_NAMESPACE::Histograms::
             TABLE_OPEN_PREFETCH_TAIL_READ_BYTES;
+      case 0x3F:
+        return ROCKSDB_NAMESPACE::Histograms::COMPACTION_PREFETCH_BYTES;
+      case 0x40:
+        return ROCKSDB_NAMESPACE::Histograms::MULTISCAN_PREPARE_MICROS;
+      case 0x41:
+        return ROCKSDB_NAMESPACE::Histograms::MULTISCAN_BLOCKS_PER_PREPARE;
       case 0x3E:
-        // 0x1F for backwards compatibility on current minor version.
+        // 0x3E is reserved for backwards compatibility on current minor
+        // version.
         return ROCKSDB_NAMESPACE::Histograms::HISTOGRAM_ENUM_MAX;
 
       default:
@@ -9117,7 +9200,7 @@ class BlockBasedTableOptionsJni
     }
 
     jmethodID method_id_init =
-        env->GetMethodID(jclazz, "<init>", "(ZZZZBBDBZJIIIJZZZZZIIZZBBJD)V");
+        env->GetMethodID(jclazz, "<init>", "(ZZZZBBDBZJIIIJZZZZZIIZZJJBBJD)V");
     if (method_id_init == nullptr) {
       // exception thrown: NoSuchMethodException or OutOfMemoryError
       return nullptr;
@@ -9162,6 +9245,9 @@ class BlockBasedTableOptionsJni
         table_factory_options->format_version,
         table_factory_options->enable_index_compression,
         table_factory_options->block_align,
+        static_cast<jlong>(table_factory_options->super_block_alignment_size),
+        static_cast<jlong>(
+            table_factory_options->super_block_alignment_space_overhead_ratio),
         IndexShorteningModeJni::toJavaIndexShorteningMode(
             table_factory_options->index_shortening),
         FilterPolicyJni::toJavaIndexType(filter_policy_type),

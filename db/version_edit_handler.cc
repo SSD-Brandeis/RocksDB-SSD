@@ -117,21 +117,43 @@ Status ListColumnFamiliesHandler::ApplyVersionEdit(
   return s;
 }
 
-Status FileChecksumRetriever::ApplyVersionEdit(VersionEdit& edit,
-                                               ColumnFamilyData** /*unused*/) {
-  for (const auto& deleted_file : edit.GetDeletedFiles()) {
-    Status s = file_checksum_list_.RemoveOneFileChecksum(deleted_file.second);
-    if (!s.ok()) {
-      return s;
+Status FileChecksumRetriever::FetchFileChecksumList(
+    FileChecksumList& file_checksum_list) {
+  Status s = Status::OK();
+  for (const auto& [cf, file_checksums] : cf_file_checksums_) {
+    [[maybe_unused]] const auto& _ = cf;
+    for (const auto& [file_number, info] : file_checksums) {
+      if (!(s = file_checksum_list.InsertOneFileChecksum(
+                file_number, info.first, info.second))
+               .ok()) {
+        break;
+      }
     }
   }
-  for (const auto& new_file : edit.GetNewFiles()) {
-    Status s = file_checksum_list_.InsertOneFileChecksum(
-        new_file.second.fd.GetNumber(), new_file.second.file_checksum,
-        new_file.second.file_checksum_func_name);
-    if (!s.ok()) {
-      return s;
+  return s;
+}
+
+Status FileChecksumRetriever::ApplyVersionEdit(VersionEdit& edit,
+                                               ColumnFamilyData** /*unused*/) {
+  uint32_t column_family_id = edit.GetColumnFamily();
+  if (edit.IsColumnFamilyDrop()) {
+    cf_file_checksums_.erase(column_family_id);
+  }
+  for (const auto& deleted_file : edit.GetDeletedFiles()) {
+    if (cf_file_checksums_.find(column_family_id) == cf_file_checksums_.end()) {
+      return Status::NotFound();
     }
+    if (cf_file_checksums_[column_family_id].find(deleted_file.second) ==
+        cf_file_checksums_[column_family_id].end()) {
+      return Status::NotFound();
+    }
+    cf_file_checksums_[column_family_id].erase(deleted_file.second);
+  }
+  for (const auto& new_file : edit.GetNewFiles()) {
+    cf_file_checksums_[column_family_id].emplace(
+        new_file.second.fd.GetNumber(),
+        std::make_pair(new_file.second.file_checksum,
+                       new_file.second.file_checksum_func_name));
   }
   for (const auto& new_blob_file : edit.GetBlobFileAdditions()) {
     std::string checksum_value = new_blob_file.GetChecksumValue();
@@ -141,11 +163,9 @@ Status FileChecksumRetriever::ApplyVersionEdit(VersionEdit& edit,
       checksum_value = kUnknownFileChecksum;
       checksum_method = kUnknownFileChecksumFuncName;
     }
-    Status s = file_checksum_list_.InsertOneFileChecksum(
-        new_blob_file.GetBlobFileNumber(), checksum_value, checksum_method);
-    if (!s.ok()) {
-      return s;
-    }
+    cf_file_checksums_[column_family_id].emplace(
+        new_blob_file.GetBlobFileNumber(),
+        std::make_pair(checksum_value, checksum_method));
   }
   return Status::OK();
 }
@@ -408,7 +428,7 @@ void VersionEditHandler::CheckIterationResult(const log::Reader& reader,
       if (cfd->IsDropped()) {
         continue;
       }
-      if (read_only_) {
+      if (version_set_->unchanging()) {
         cfd->table_cache()->SetTablesAreImmortal();
       }
       *s = LoadTables(cfd, /*prefetch_index_and_filter_in_cache=*/false,
@@ -471,8 +491,8 @@ void VersionEditHandler::CheckIterationResult(const log::Reader& reader,
 ColumnFamilyData* VersionEditHandler::CreateCfAndInit(
     const ColumnFamilyOptions& cf_options, const VersionEdit& edit) {
   uint32_t cf_id = edit.GetColumnFamily();
-  ColumnFamilyData* cfd =
-      version_set_->CreateColumnFamily(cf_options, read_options_, &edit);
+  ColumnFamilyData* cfd = version_set_->CreateColumnFamily(
+      cf_options, read_options_, &edit, read_only_);
   assert(cfd != nullptr);
   cfd->set_initialized();
   assert(builders_.find(cf_id) == builders_.end());
@@ -1135,6 +1155,15 @@ void DumpManifestHandler::CheckIterationResult(const log::Reader& reader,
     // Print out DebugStrings. Can include non-terminating null characters.
     fwrite(cfd->current()->DebugString(hex_).data(), sizeof(char),
            cfd->current()->DebugString(hex_).size(), stdout);
+
+    fprintf(stdout,
+            "By default, manifest file dump prints LSM trees as if %d levels "
+            "were configured, "
+            "which is not necessarily true for the column family (CF) this "
+            "manifest is associated with. "
+            "Please consult other DB files, such as the OPTIONS file, to "
+            "confirm.\n",
+            cfd->ioptions().num_levels);
   }
   fprintf(stdout,
           "next_file_number %" PRIu64 " last_sequence %" PRIu64
