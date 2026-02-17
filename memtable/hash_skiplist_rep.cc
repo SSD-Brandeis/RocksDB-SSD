@@ -6,8 +6,6 @@
 
 #include <atomic>
 
-
-
 #include "db/memtable.h"
 #include "memory/arena.h"
 #include "memtable/skiplist.h"
@@ -18,10 +16,6 @@
 #include "rocksdb/utilities/options_type.h"
 #include "util/murmurhash.h"
 
-
-#include <chrono>
-#include <iostream>
-// #define TIMER
 namespace ROCKSDB_NAMESPACE {
 namespace {
 
@@ -67,6 +61,13 @@ class HashSkipListRep : public MemTableRep {
   const MemTableRep::KeyComparator& compare_;
   // immutable after construction
   Allocator* const allocator_;
+
+  std::atomic<uint64_t> transform_time_{0};
+  std::atomic<uint64_t> bucket_total_time_{0};
+  std::atomic<uint64_t> contains_check_time_{0};
+  std::atomic<uint64_t> hash_time_{0};
+  std::atomic<uint64_t> bucket_lookup_time_{0};
+  std::atomic<uint64_t> skiplist_insert_time_{0};
 
   inline size_t GetHash(const Slice& slice) const {
     return MurmurHash(slice.data(), static_cast<int>(slice.size()), 0) %
@@ -254,11 +255,32 @@ HashSkipListRep::HashSkipListRep(const MemTableRep::KeyComparator& compare,
   }
 }
 
-HashSkipListRep::~HashSkipListRep() = default;
+// HashSkipListRep::~HashSkipListRep() = default;
+HashSkipListRep::~HashSkipListRep() {
+  double contains_check_time = contains_check_time_.load(std::memory_order_relaxed);
+  double transform = transform_time_.load(std::memory_order_relaxed);
+  double bucket_total = bucket_total_time_.load(std::memory_order_relaxed);
+  double skiplist = skiplist_insert_time_.load(std::memory_order_relaxed);
+  double total = contains_check_time + transform + bucket_total + skiplist;
+  
+  double hash_time = hash_time_.load(std::memory_order_relaxed);
+  double bucket_lookup_time = bucket_lookup_time_.load(std::memory_order_relaxed);
+
+  printf("\n==== HashSkipListRep Timing Breakdown ====\n");
+  printf("Contains check:        %.0f ns\n", contains_check_time);
+  printf("Transform time:        %.0f ns\n", transform);
+  printf("Hash time:             %.0f ns\n", hash_time);
+  printf("Bucket lookup time:    %.0f ns\n", bucket_lookup_time);
+  printf("Bucket total time:     %.0f ns\n", bucket_total);
+  printf("SkipList insert time:  %.0f ns\n", skiplist);
+  printf("Total measured:        %.0f ns\n", total);
+}
 
 HashSkipListRep::Bucket* HashSkipListRep::GetInitializedBucket(
     const Slice& transformed) {
+  uint64_t t0 = Env::Default()->NowNanos();
   size_t hash = GetHash(transformed);
+  uint64_t t1 = Env::Default()->NowNanos();
   auto bucket = GetBucket(hash);
   if (bucket == nullptr) {
     auto addr = allocator_->AllocateAligned(sizeof(Bucket));
@@ -266,26 +288,32 @@ HashSkipListRep::Bucket* HashSkipListRep::GetInitializedBucket(
                                skiplist_branching_factor_);
     buckets_[hash].store(bucket, std::memory_order_release);
   }
+  uint64_t t2 = Env::Default()->NowNanos();
+  hash_time_ += (t1 - t0);
+  bucket_lookup_time_ += (t2 - t1);
   return bucket;
 }
 
 void HashSkipListRep::Insert(KeyHandle handle) {
-  #ifdef TIMER
-  auto start = std::chrono::high_resolution_clock::now();
-  #endif
-
   auto* key = static_cast<char*>(handle);
+  uint64_t before_t0 = Env::Default()->NowNanos();
+
   assert(!Contains(key));
+  // std::cout << "assert value "<< !Contains(key) <<std::endl << std::flush;
+  uint64_t t0 = Env::Default()->NowNanos();
   auto transformed = transform_->Transform(UserKey(key));
+
+  uint64_t t1 = Env::Default()->NowNanos();
   auto bucket = GetInitializedBucket(transformed);
 
+  uint64_t t2 = Env::Default()->NowNanos();
   bucket->Insert(key);
-  #ifdef TIMER
-  auto stop = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
-  std::cout << "HashSkipList_Insert: " << duration.count() << ", " << std::flush;
-  #endif
+  uint64_t t3 = Env::Default()->NowNanos();
 
+  contains_check_time_ += (t0 - before_t0);
+  transform_time_ += (t1 - t0);
+  bucket_total_time_ += (t2 - t1);
+  skiplist_insert_time_ += (t3 - t2);
 }
 
 bool HashSkipListRep::Contains(const char* key) const {
@@ -301,7 +329,6 @@ size_t HashSkipListRep::ApproximateMemoryUsage() { return 0; }
 
 void HashSkipListRep::Get(const LookupKey& k, void* callback_args,
                           bool (*callback_func)(void* arg, const char* entry)) {
-
   auto transformed = transform_->Transform(k.user_key());
   auto bucket = GetBucket(transformed);
   if (bucket != nullptr) {
@@ -311,7 +338,6 @@ void HashSkipListRep::Get(const LookupKey& k, void* callback_args,
          iter.Next()) {
     }
   }
-
 }
 
 MemTableRep::Iterator* HashSkipListRep::GetIterator(Arena* arena) {
