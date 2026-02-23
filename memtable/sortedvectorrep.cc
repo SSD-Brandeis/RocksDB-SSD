@@ -19,10 +19,10 @@
 
 namespace ROCKSDB_NAMESPACE {
 namespace {
-
-class VectorRep : public MemTableRep {
+class SortedVectorRep : public MemTableRep {
  public:
-  VectorRep(const KeyComparator& compare, Allocator* allocator, size_t count);
+  SortedVectorRep(const KeyComparator& compare, Allocator* allocator,
+                  size_t count);
 
   // Insert key into the collection. (The caller will pack key and value into a
   // single buffer and pass that in as the parameter to Insert)
@@ -44,19 +44,16 @@ class VectorRep : public MemTableRep {
 
   void BatchPostProcess() override;
 
-  ~VectorRep() override = default;
-
+  ~SortedVectorRep() override = default;
   class Iterator : public MemTableRep::Iterator {
-    class VectorRep* vrep_;
+    class SortedVectorRep* vrep_;
     std::shared_ptr<std::vector<const char*>> bucket_;
     std::vector<const char*>::const_iterator mutable cit_;
     const KeyComparator& compare_;
     std::string tmp_;  // For passing to EncodeKey
-    bool mutable sorted_;
-    void DoSort() const;
 
    public:
-    explicit Iterator(class VectorRep* vrep,
+    explicit Iterator(class SortedVectorRep* vrep,
                       std::shared_ptr<std::vector<const char*>> bucket,
                       const KeyComparator& compare);
 
@@ -112,7 +109,6 @@ class VectorRep : public MemTableRep {
   std::shared_ptr<Bucket> bucket_;
   mutable port::RWMutex rwlock_;
   bool immutable_;
-  bool sorted_;
   const KeyComparator& compare_;
   // Thread-local vector to buffer concurrent writes.
   using TlBucket = std::vector<const char*>;
@@ -124,131 +120,112 @@ class VectorRep : public MemTableRep {
   }
 };
 
-void VectorRep::Insert(KeyHandle handle) {
+void SortedVectorRep::Insert(KeyHandle handle) {
   auto* key = static_cast<char*>(handle);
   {
     WriteLock l(&rwlock_);
     assert(!immutable_);
-    bucket_->push_back(key);
+    const auto position = std::lower_bound(
+        bucket_->begin(), bucket_->end(), key,
+        [this](const char* a, const char* b) { return compare_(a, b) < 0; });
+    bucket_->insert(position, key);
   }
   bucket_size_.FetchAddRelaxed(1);
-}
+};
 
-void VectorRep::InsertConcurrently(KeyHandle handle) {
+void SortedVectorRep::InsertConcurrently(KeyHandle handle) {
   auto* v = static_cast<TlBucket*>(tl_writes_.Get());
   if (!v) {
     v = new TlBucket();
     tl_writes_.Reset(v);
+    v->push_back(static_cast<char*>(handle));
+  } else {
+    const auto position = std::lower_bound(
+        v->begin(), v->end(), static_cast<char*>(handle),
+        [this](const char* a, const char* b) { return compare_(a, b) < 0; });
+    v->insert(position, static_cast<char*>(handle));
   }
-  v->push_back(static_cast<char*>(handle));
 }
 
-// Returns true iff an entry that compares equal to key is in the collection.
-bool VectorRep::Contains(const char* key) const {
+bool SortedVectorRep::Contains(const char* key) const {
   ReadLock l(&rwlock_);
-  return std::find(bucket_->begin(), bucket_->end(), key) != bucket_->end();
+  auto it = std::lower_bound(
+      bucket_->begin(), bucket_->end(), key,
+      [this](const char* a, const char* b) { return compare_(a, b) < 0; });
+  return it != bucket_->end() && compare_(*it, key) == 0;
 }
 
-void VectorRep::MarkReadOnly() {
+void SortedVectorRep::MarkReadOnly() {
   WriteLock l(&rwlock_);
   immutable_ = true;
 }
 
-size_t VectorRep::ApproximateMemoryUsage() {
+size_t SortedVectorRep::ApproximateMemoryUsage() {
   return bucket_size_.LoadRelaxed() *
          sizeof(std::remove_reference<decltype(*bucket_)>::type::value_type);
 }
 
-void VectorRep::BatchPostProcess() {
+void SortedVectorRep::BatchPostProcess() {
   auto* v = static_cast<TlBucket*>(tl_writes_.Get());
   if (v) {
-    {
-      WriteLock l(&rwlock_);
-      assert(!immutable_);
-      for (auto& key : *v) {
-        bucket_->push_back(key);
-      }
-    }
-    bucket_size_.FetchAddRelaxed(v->size());
-    delete v;
-    tl_writes_.Reset(nullptr);
+    WriteLock l(&rwlock_);
+    assert(!immutable_);
+    std::vector<const char*> merged;
+    merged.reserve(bucket_->size() + v->size());
+
+    std::merge(
+        bucket_->begin(), bucket_->end(), v->begin(), v->end(),
+        std::back_inserter(merged),
+        [this](const char* a, const char* b) { return compare_(a, b) < 0; });
+
+    bucket_->swap(merged);
   }
+  bucket_size_.FetchAddRelaxed(v->size());
+  delete v;
+  tl_writes_.Reset(nullptr);
 }
 
-VectorRep::VectorRep(const KeyComparator& compare, Allocator* allocator,
-                     size_t count)
+SortedVectorRep::SortedVectorRep(const KeyComparator& compare,
+                                 Allocator* allocator, size_t count)
     : MemTableRep(allocator),
       bucket_size_(0),
       bucket_(new Bucket()),
       immutable_(false),
-      sorted_(false),
       compare_(compare),
       tl_writes_(DeleteTlBucket) {
   bucket_.get()->reserve(count);
 }
 
-VectorRep::Iterator::Iterator(class VectorRep* vrep,
-                              std::shared_ptr<std::vector<const char*>> bucket,
-                              const KeyComparator& compare)
-    : vrep_(vrep),
-      bucket_(bucket),
-      cit_(bucket_->end()),
-      compare_(compare),
-      sorted_(false) {}
-
-void VectorRep::Iterator::DoSort() const {
-  // vrep is non-null means that we are working on an immutable memtable
-  if (!sorted_ && vrep_ != nullptr) {
-    WriteLock l(&vrep_->rwlock_);
-    if (!vrep_->sorted_) {
-      std::sort(bucket_->begin(), bucket_->end(),
-                stl_wrappers::Compare(compare_));
-      cit_ = bucket_->begin();
-      vrep_->sorted_ = true;
-    }
-    sorted_ = true;
-  }
-  if (!sorted_) {
-    std::sort(bucket_->begin(), bucket_->end(),
-              stl_wrappers::Compare(compare_));
-    cit_ = bucket_->begin();
-    sorted_ = true;
-  }
-  assert(sorted_);
-  assert(vrep_ == nullptr || vrep_->sorted_);
-}
+SortedVectorRep::Iterator::Iterator(
+    class SortedVectorRep* vrep,
+    std::shared_ptr<std::vector<const char*>> bucket,
+    const KeyComparator& compare)
+    : vrep_(vrep), bucket_(bucket), cit_(bucket_->end()), compare_(compare) {}
 
 // Returns true iff the iterator is positioned at a valid node.
-bool VectorRep::Iterator::Valid() const {
-  DoSort();
-  return cit_ != bucket_->end();
-}
+bool SortedVectorRep::Iterator::Valid() const { return cit_ != bucket_->end(); }
 
 // Returns the key at the current position.
 // REQUIRES: Valid()
-const char* VectorRep::Iterator::key() const {
-  assert(sorted_);
-  return *cit_;
-}
+const char* SortedVectorRep::Iterator::key() const { return *cit_; }
 
-// Advances to the next position.
+// Advances to the next greater key position.
 // REQUIRES: Valid()
-void VectorRep::Iterator::Next() {
-  assert(sorted_);
+//
+// Sorted vector can just move to the next position
+void SortedVectorRep::Iterator::Next() {
   if (cit_ == bucket_->end()) {
     return;
   }
   ++cit_;
 }
 
-// Advances to the previous position.
+// Advances to the previous smaller key position.
 // REQUIRES: Valid()
-void VectorRep::Iterator::Prev() {
-  assert(sorted_);
+//
+// Sorted vector can just move to the previous position
+void SortedVectorRep::Iterator::Prev() {
   if (cit_ == bucket_->begin()) {
-    // If you try to go back from the first element, the iterator should be
-    // invalidated. So we set it to past-the-end. This means that you can
-    // treat the container circularly.
     cit_ = bucket_->end();
   } else {
     --cit_;
@@ -256,10 +233,8 @@ void VectorRep::Iterator::Prev() {
 }
 
 // Advance to the first entry with a key >= target
-void VectorRep::Iterator::Seek(const Slice& user_key,
-                               const char* memtable_key) {
-  DoSort();
-  // Do binary search to find first value not less than the target
+void SortedVectorRep::Iterator::Seek(const Slice& user_key,
+                                     const char* memtable_key) {
   const char* encoded_key =
       (memtable_key != nullptr) ? memtable_key : EncodeKey(&tmp_, user_key);
   cit_ = std::equal_range(bucket_->begin(), bucket_->end(), encoded_key,
@@ -269,7 +244,7 @@ void VectorRep::Iterator::Seek(const Slice& user_key,
              .first;
 }
 
-Status VectorRep::Iterator::SeekAndValidate(
+Status SortedVectorRep::Iterator::SeekAndValidate(
     const Slice& /* internal_key */, const char* /* memtable_key */,
     bool /* allow_data_in_errors */, bool /* detect_key_out_of_order */,
     const std::function<Status(const char*, bool)>&
@@ -288,32 +263,28 @@ Status VectorRep::Iterator::SeekAndValidate(
 }
 
 // Advance to the first entry with a key <= target
-void VectorRep::Iterator::SeekForPrev(const Slice& /*user_key*/,
-                                      const char* /*memtable_key*/) {
+void SortedVectorRep::Iterator::SeekForPrev(const Slice& internal_key,
+                                            const char* memtable_key) {
   assert(false);
 }
 
 // Position at the first entry in collection.
 // Final state of iterator is Valid() iff collection is not empty.
-void VectorRep::Iterator::SeekToFirst() {
-  DoSort();
-  cit_ = bucket_->begin();
-}
+void SortedVectorRep::Iterator::SeekToFirst() { cit_ = bucket_->begin(); }
 
 // Position at the last entry in collection.
 // Final state of iterator is Valid() iff collection is not empty.
-void VectorRep::Iterator::SeekToLast() {
-  DoSort();
+void SortedVectorRep::Iterator::SeekToLast() {
   cit_ = bucket_->end();
   if (bucket_->size() != 0) {
     --cit_;
   }
 }
 
-void VectorRep::Get(const LookupKey& k, void* callback_args,
-                    bool (*callback_func)(void* arg, const char* entry)) {
+void SortedVectorRep::Get(const LookupKey& k, void* callback_args,
+                          bool (*callback_func)(void* arg, const char* entry)) {
   rwlock_.ReadLock();
-  VectorRep* vector_rep;
+  SortedVectorRep* vector_rep;
   std::shared_ptr<Bucket> bucket;
   if (immutable_) {
     vector_rep = this;
@@ -321,7 +292,8 @@ void VectorRep::Get(const LookupKey& k, void* callback_args,
     vector_rep = nullptr;
     bucket.reset(new Bucket(*bucket_));  // make a copy
   }
-  VectorRep::Iterator iter(vector_rep, immutable_ ? bucket_ : bucket, compare_);
+
+  SortedVectorRep::Iterator iter(vector_rep, bucket, compare_);
   rwlock_.ReadUnlock();
 
   for (iter.Seek(k.user_key(), k.memtable_key().data());
@@ -329,14 +301,12 @@ void VectorRep::Get(const LookupKey& k, void* callback_args,
   }
 }
 
-MemTableRep::Iterator* VectorRep::GetIterator(Arena* arena) {
+MemTableRep::Iterator* SortedVectorRep::GetIterator(Arena* arena) {
   char* mem = nullptr;
   if (arena != nullptr) {
     mem = arena->AllocateAligned(sizeof(Iterator));
   }
   ReadLock l(&rwlock_);
-  // Do not sort here. The sorting would be done the first time
-  // a Seek is performed on the iterator.
   if (immutable_) {
     if (arena == nullptr) {
       return new Iterator(this, bucket_, compare_);
@@ -355,19 +325,22 @@ MemTableRep::Iterator* VectorRep::GetIterator(Arena* arena) {
 }
 }  // namespace
 
-static std::unordered_map<std::string, OptionTypeInfo> vector_rep_table_info = {
-    {"count",
-     {0, OptionType::kSizeT, OptionVerificationType::kNormal,
-      OptionTypeFlags::kNone}},
+static std::unordered_map<std::string, OptionTypeInfo>
+    sorted_vector_rep_table_info = {
+        {"count",
+         {0, OptionType::kSizeT, OptionVerificationType::kNormal,
+          OptionTypeFlags::kNone}},
 };
 
-VectorRepFactory::VectorRepFactory(size_t count) : count_(count) {
-  RegisterOptions("VectorRepFactoryOptions", &count_, &vector_rep_table_info);
+SortedVectorRepFactory::SortedVectorRepFactory(size_t count) : count_(count) {
+  RegisterOptions("SortedVectorRepFactory", &count_,
+                  &sorted_vector_rep_table_info);
 }
 
-MemTableRep* VectorRepFactory::CreateMemTableRep(
+MemTableRep* SortedVectorRepFactory::CreateMemTableRep(
     const MemTableRep::KeyComparator& compare, Allocator* allocator,
-    const SliceTransform*, Logger* /*logger*/) {
-  return new VectorRep(compare, allocator, count_);
+    const SliceTransform*, Logger* /* logger */) {
+  return new SortedVectorRep(compare, allocator, count_);
 }
+
 }  // namespace ROCKSDB_NAMESPACE

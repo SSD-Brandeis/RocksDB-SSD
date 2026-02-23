@@ -285,6 +285,7 @@ const std::vector<std::pair<Tickers, std::string>> TickersNameMap = {
 const std::vector<std::pair<Histograms, std::string>> HistogramsNameMap = {
     {DB_GET, "rocksdb.db.get.micros"},
     {DB_WRITE, "rocksdb.db.write.micros"},
+    {DB_WRITE_TOTAL, "rocksdb.db.write.total.micros"},
     {COMPACTION_TIME, "rocksdb.compaction.times.micros"},
     {COMPACTION_CPU_TIME, "rocksdb.compaction.times.cpu_micros"},
     {SUBCOMPACTION_SETUP_TIME, "rocksdb.subcompaction.setup.times.micros"},

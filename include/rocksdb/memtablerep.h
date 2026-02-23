@@ -46,9 +46,6 @@
 #include "rocksdb/customizable.h"
 #include "rocksdb/slice.h"
 
-#include <chrono>
-#include <iostream>
-// #define TIMER
 namespace ROCKSDB_NAMESPACE {
 
 class Arena;
@@ -106,15 +103,7 @@ class MemTableRep {
   // Returns false if MemTableRepFactory::CanHandleDuplicatedKey() is true and
   // the <key, seq> already exists.
   virtual bool InsertKey(KeyHandle handle) {
-  #ifdef TIMER
-  auto start = std::chrono::high_resolution_clock::now();
-  #endif
     Insert(handle);
-  #ifdef TIMER
-    auto stop = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
-    std::cout << "MemTableRep: " << duration.count() << ", " << std::flush;
-  #endif
     return true;
   }
 
@@ -448,6 +437,38 @@ class VectorRepFactory : public MemTableRepFactory {
   bool IsInsertConcurrentlySupported() const override { return true; }
 };
 
+// This class contains a fixed array of buckets, each
+// pointing to a skiplist (null if the bucket is empty).
+// bucket_count: number of fixed array buckets
+// skiplist_height: the max height of the skiplist
+// skiplist_branching_factor: probabilistic size ratio between adjacent
+//                            link lists in the skiplist
+MemTableRepFactory* NewHashSkipListRepFactory(
+    size_t bucket_count = 1000000, int32_t skiplist_height = 4,
+    int32_t skiplist_branching_factor = 4);
+
+// The factory is to create memtables based on a hash table:
+// it contains a fixed array of buckets, each pointing to either a linked list
+// or a skip list if number of entries inside the bucket exceeds
+// threshold_use_skiplist.
+// @bucket_count: number of fixed array buckets
+// @huge_page_tlb_size: if <=0, allocate the hash table bytes from malloc.
+//                      Otherwise from huge page TLB. The user needs to reserve
+//                      huge pages for it to be allocated, like:
+//                          sysctl -w vm.nr_hugepages=20
+//                      See linux doc Documentation/vm/hugetlbpage.txt
+// @bucket_entries_logging_threshold: if number of entries in one bucket
+//                                    exceeds this number, log about it.
+// @if_log_bucket_dist_when_flash: if true, log distribution of number of
+//                                 entries when flushing.
+// @threshold_use_skiplist: a bucket switches to skip list if number of
+//                          entries exceed this parameter.
+MemTableRepFactory* NewHashLinkListRepFactory(
+    size_t bucket_count = 50000, size_t huge_page_tlb_size = 0,
+    int bucket_entries_logging_threshold = 4096,
+    bool if_log_bucket_dist_when_flash = true,
+    uint32_t threshold_use_skiplist = 256);
+
 // This creates MemTableReps that are backed by an std::vector. On iteration,
 // the vector is *not* sorted, as opposed to `VectorRep`. This is useful for
 // workloads where iteration doesn't happen.
@@ -484,15 +505,15 @@ public:
 //   count: Passed to the constructor of the underlying std::vector of each
 //     UnsortedVectorRep. On initialization, the underlying array will be
 //     at least count bytes reserved for usage.
-class AlwaysSortedVectorRepFactory : public MemTableRepFactory {
+class SortedVectorRepFactory : public MemTableRepFactory {
   size_t count_;
 
 public:
-  explicit AlwaysSortedVectorRepFactory(size_t count = 0);
+  explicit SortedVectorRepFactory(size_t count = 0);
 
   // Methods for Configurable/Customizable class overrides
-  static const char* kClassName() { return "AlwaysSortedVectorRepFactory"; }
-  static const char* kNickName() { return "always_sorted_vector"; }
+  static const char* kClassName() { return "SortedVectorRepFactory"; }
+  static const char* kNickName() { return "sorted_vector"; }
   const char* Name() const override { return kClassName(); }
   const char* NickName() const override { return kNickName(); }
 
@@ -503,38 +524,6 @@ public:
                                  Logger* logger) override;
 
 };
-
-// This class contains a fixed array of buckets, each
-// pointing to a skiplist (null if the bucket is empty).
-// bucket_count: number of fixed array buckets
-// skiplist_height: the max height of the skiplist
-// skiplist_branching_factor: probabilistic size ratio between adjacent
-//                            link lists in the skiplist
-MemTableRepFactory* NewHashSkipListRepFactory(
-    size_t bucket_count = 1000000, int32_t skiplist_height = 4,
-    int32_t skiplist_branching_factor = 4);
-
-// The factory is to create memtables based on a hash table:
-// it contains a fixed array of buckets, each pointing to either a linked list
-// or a skip list if number of entries inside the bucket exceeds
-// threshold_use_skiplist.
-// @bucket_count: number of fixed array buckets
-// @huge_page_tlb_size: if <=0, allocate the hash table bytes from malloc.
-//                      Otherwise from huge page TLB. The user needs to reserve
-//                      huge pages for it to be allocated, like:
-//                          sysctl -w vm.nr_hugepages=20
-//                      See linux doc Documentation/vm/hugetlbpage.txt
-// @bucket_entries_logging_threshold: if number of entries in one bucket
-//                                    exceeds this number, log about it.
-// @if_log_bucket_dist_when_flash: if true, log distribution of number of
-//                                 entries when flushing.
-// @threshold_use_skiplist: a bucket switches to skip list if number of
-//                          entries exceed this parameter.
-MemTableRepFactory* NewHashLinkListRepFactory(
-    size_t bucket_count = 50000, size_t huge_page_tlb_size = 0,
-    int bucket_entries_logging_threshold = 4096,
-    bool if_log_bucket_dist_when_flash = true,
-    uint32_t threshold_use_skiplist = 256);
 
 MemTableRepFactory* NewLinkListRepFactory();
 

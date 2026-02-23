@@ -7,8 +7,6 @@
 #include <algorithm>
 #include <atomic>
 
-
-
 #include "db/memtable.h"
 #include "memory/arena.h"
 #include "memtable/skiplist.h"
@@ -20,9 +18,6 @@
 #include "rocksdb/utilities/options_type.h"
 #include "util/hash.h"
 
-#include <chrono>
-#include <iostream>
-// #define TIMER
 namespace ROCKSDB_NAMESPACE {
 namespace {
 
@@ -584,14 +579,11 @@ Node* HashLinkListRep::GetLinkListFirstNode(Pointer& bucket_pointer) const {
 }
 
 void HashLinkListRep::Insert(KeyHandle handle) {
-
   Node* x = static_cast<Node*>(handle);
   assert(!Contains(x->key));
   Slice internal_key = GetLengthPrefixedSlice(x->key);
   auto transformed = GetPrefix(internal_key);
   auto& bucket = buckets_[GetHash(transformed)];
-  // std::cout << " Internal Key: " << internal_key.ToStringView() <<  " ===> Transformed: " << transformed.ToStringView() << " :::: Bucket: " << GetHash(transformed) << std::endl << std::flush;
-
   Pointer* first_next_pointer =
       static_cast<Pointer*>(bucket.load(std::memory_order_relaxed));
 
@@ -599,16 +591,8 @@ void HashLinkListRep::Insert(KeyHandle handle) {
     // Case 1. empty bucket
     // NoBarrier_SetNext() suffices since we will add a barrier when
     // we publish a pointer to "x" in prev[i].
-    #ifdef TIMER
-    auto start = std::chrono::high_resolution_clock::now();
-    #endif
     x->NoBarrier_SetNext(nullptr);
     bucket.store(x, std::memory_order_release);
-    #ifdef TIMER
-    auto stop = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
-    std::cout << "HashLinkList_Insert_case_1_empty: " << duration.count() << ", " << std::flush;
-    #endif
     return;
   }
 
@@ -616,9 +600,6 @@ void HashLinkListRep::Insert(KeyHandle handle) {
   if (first_next_pointer->load(std::memory_order_relaxed) == nullptr) {
     // Case 2. only one entry in the bucket
     // Need to convert to a Counting bucket and turn to case 4.
-    #ifdef TIMER
-    auto start = std::chrono::high_resolution_clock::now();
-    #endif
     Node* first = reinterpret_cast<Node*>(first_next_pointer);
     // Need to add a bucket header.
     // We have to first convert it to a bucket with header before inserting
@@ -628,11 +609,6 @@ void HashLinkListRep::Insert(KeyHandle handle) {
     auto* mem = allocator_->AllocateAligned(sizeof(BucketHeader));
     header = new (mem) BucketHeader(first, 1);
     bucket.store(header, std::memory_order_release);
-    #ifdef TIMER
-    auto stop = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
-    std::cout << "HashLinkList_Insert_case_2_bucket_header: " << duration.count() << ", " << std::flush;
-    #endif
   } else {
     header = reinterpret_cast<BucketHeader*>(first_next_pointer);
     if (header->IsSkipListBucket()) {
@@ -644,7 +620,6 @@ void HashLinkListRep::Insert(KeyHandle handle) {
       // incremental.
       skip_list_bucket_header->Counting_header.IncNumEntries();
       skip_list_bucket_header->skip_list.Insert(x->key);
-
       return;
     }
   }
@@ -683,9 +658,6 @@ void HashLinkListRep::Insert(KeyHandle handle) {
   } else {
     // Case 5. Need to insert to the sorted linked list without changing the
     // header.
-    #ifdef TIMER
-    auto start = std::chrono::high_resolution_clock::now();
-    #endif
     Node* first =
         reinterpret_cast<Node*>(header->next.load(std::memory_order_relaxed));
     assert(first != nullptr);
@@ -726,13 +698,7 @@ void HashLinkListRep::Insert(KeyHandle handle) {
     } else {
       header->next.store(static_cast<void*>(x), std::memory_order_release);
     }
-    #ifdef TIMER
-    auto stop = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
-    std::cout << "HashLinkList_Insert_case_5_linkedlist: " << duration.count() << ", " << std::flush;
-    #endif
   }
-
 }
 
 bool HashLinkListRep::Contains(const char* key) const {
@@ -763,7 +729,6 @@ size_t HashLinkListRep::ApproximateMemoryUsage() {
 
 void HashLinkListRep::Get(const LookupKey& k, void* callback_args,
                           bool (*callback_func)(void* arg, const char* entry)) {
-
   auto transformed = transform_->Transform(k.user_key());
   Pointer& bucket = GetBucket(transformed);
 
@@ -789,7 +754,6 @@ void HashLinkListRep::Get(const LookupKey& k, void* callback_args,
       }
     }
   }
-
 }
 
 MemTableRep::Iterator* HashLinkListRep::GetIterator(Arena* alloc_arena) {

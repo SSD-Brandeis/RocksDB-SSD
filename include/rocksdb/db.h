@@ -35,16 +35,6 @@
 #include "rocksdb/version.h"
 #include "rocksdb/wide_columns.h"
 
-#include <chrono>
-#include <iostream>
-// #define GET_TIMER
-
-#if defined(__GNUC__) || defined(__clang__)
-#define ROCKSDB_DEPRECATED_FUNC __attribute__((__deprecated__))
-#elif _WIN32
-#define ROCKSDB_DEPRECATED_FUNC __declspec(deprecated)
-#endif
-
 namespace ROCKSDB_NAMESPACE {
 
 struct ColumnFamilyOptions;
@@ -521,17 +511,7 @@ class DB {
                      const Slice& ts, const Slice& value) = 0;
   virtual Status Put(const WriteOptions& options, const Slice& key,
                      const Slice& value) {
-    #ifdef TIMER
-    auto __inline_put1_start = std::chrono::high_resolution_clock::now();
-    #endif
     return Put(options, DefaultColumnFamily(), key, value);
-    #ifdef TIMER
-    auto __inline_put1_end = std::chrono::high_resolution_clock::now();
-    auto __inline_put1_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        __inline_put1_end - __inline_put1_start);
-    std::cout << "DB: "
-              << __inline_put1_ns.count() << std::endl << std::flush;
-    #endif
   }
   virtual Status Put(const WriteOptions& options, const Slice& key,
                      const Slice& ts, const Slice& value) {
@@ -726,9 +706,6 @@ class DB {
   virtual inline Status Get(const ReadOptions& options,
                             ColumnFamilyHandle* column_family, const Slice& key,
                             std::string* value) final {
-#ifdef GET_TIMER
-      auto start = std::chrono::high_resolution_clock::now();
-#endif // GET_TIMER                              
     assert(value != nullptr);
     PinnableSlice pinnable_val(value);
     assert(!pinnable_val.IsPinned());
@@ -736,11 +713,6 @@ class DB {
     if (s.ok() && pinnable_val.IsPinned()) {
       value->assign(pinnable_val.data(), pinnable_val.size());
     }  // else value is already assigned
-#ifdef GET_TIMER
-      auto stop = std::chrono::high_resolution_clock::now();
-      auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
-      std::cout << "DB::" <<  __FUNCTION__ << ": " << duration.count() << std::endl << std::flush;
-#endif // GET_TIMER
     return s;
   }
 
