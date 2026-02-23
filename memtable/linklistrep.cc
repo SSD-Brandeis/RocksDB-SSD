@@ -1,5 +1,7 @@
-
-
+//  Custom implementation from SSD-Lab
+//
+//  LinkListRep is a MemTableRep implementation that uses a linked list.
+//
 #include <assert.h>
 #include <stddef.h>
 #include <atomic>

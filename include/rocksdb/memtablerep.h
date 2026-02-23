@@ -480,7 +480,7 @@ MemTableRepFactory* NewHashLinkListRepFactory(
 class UnsortedVectorRepFactory : public MemTableRepFactory {
   size_t count_;
 
-public:
+ public:
   explicit UnsortedVectorRepFactory(size_t count = 0);
 
   // Methods for Configurable/Customizable class overrides
@@ -494,7 +494,7 @@ public:
   MemTableRep* CreateMemTableRep(const MemTableRep::KeyComparator&, Allocator*,
                                  const SliceTransform*,
                                  Logger* logger) override;
-
+  bool IsInsertConcurrentlySupported() const override { return true; }
 };
 
 // This creates MemTableReps that are backed by an std::vector. On iteration,
@@ -508,7 +508,7 @@ public:
 class SortedVectorRepFactory : public MemTableRepFactory {
   size_t count_;
 
-public:
+ public:
   explicit SortedVectorRepFactory(size_t count = 0);
 
   // Methods for Configurable/Customizable class overrides
@@ -522,7 +522,7 @@ public:
   MemTableRep* CreateMemTableRep(const MemTableRep::KeyComparator&, Allocator*,
                                  const SliceTransform*,
                                  Logger* logger) override;
-
+  bool IsInsertConcurrentlySupported() const override { return true; }
 };
 
 MemTableRepFactory* NewLinkListRepFactory();

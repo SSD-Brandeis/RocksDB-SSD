@@ -1,0 +1,26 @@
+name: LSMMemoryProfiling
+
+on:
+  push:
+    branches: [LSMMemoryProfiling]
+  pull_request:
+    branches: [LSMMemoryProfiling]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/facebook/rocksdb_ubuntu:22.1
+      options: --shm-size=16gb
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build RocksDB
+        run: |
+          rm -rf build
+          mkdir -p build && cd build
+          cmake -DWITH_GFLAGS=OFF ..
+          make -j$(nproc)
+      - name: Run all tests
+        run: |
+          cd build
+          ctest -j$(nproc) --output-on-failure
