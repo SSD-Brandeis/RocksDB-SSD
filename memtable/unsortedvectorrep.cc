@@ -52,6 +52,8 @@ class UnsortedVectorRep : public MemTableRep {
     std::vector<const char*>::const_iterator mutable cit_;
     const KeyComparator& compare_;
     std::string tmp_;  // For passing to EncodeKey
+    bool mutable sorted_;
+    void DoSort() const;
 
    public:
     explicit Iterator(class UnsortedVectorRep* vrep,
@@ -77,6 +79,9 @@ class UnsortedVectorRep : public MemTableRep {
     // Advances to the previous position.
     // REQUIRES: Valid()
     void Prev() override;
+
+    // Advance to the first entry with a key >= target
+    void SeekGet(const Slice& user_key, const char* memtable_key);
 
     // Advance to the first entry with a key >= target
     void Seek(const Slice& user_key, const char* memtable_key) override;
@@ -110,6 +115,7 @@ class UnsortedVectorRep : public MemTableRep {
   std::shared_ptr<Bucket> bucket_;
   mutable port::RWMutex rwlock_;
   bool immutable_;
+  bool sorted_;
   const KeyComparator& compare_;
   // Thread-local vector to buffer concurrent writes.
   using TlBucket = std::vector<const char*>;
@@ -178,6 +184,7 @@ UnsortedVectorRep::UnsortedVectorRep(const KeyComparator& compare,
       bucket_size_(0),
       bucket_(new Bucket()),
       immutable_(false),
+      sorted_(false),
       compare_(compare),
       tl_writes_(DeleteTlBucket) {
   bucket_.get()->reserve(count);
@@ -190,89 +197,99 @@ UnsortedVectorRep::Iterator::Iterator(
     : vrep_(vrep),
       bucket_(bucket),
       cit_(bucket_->end()),
-      compare_(compare) {}
+      compare_(compare),
+      sorted_(false) {}
+
+void UnsortedVectorRep::Iterator::DoSort() const {
+  // vrep is non-null means that we are working on an immutable memtable
+  if (!sorted_ && vrep_ != nullptr) {
+    WriteLock l(&vrep_->rwlock_);
+    if (!vrep_->sorted_) {
+      std::sort(bucket_->begin(), bucket_->end(),
+                stl_wrappers::Compare(compare_));
+      cit_ = bucket_->begin();
+      vrep_->sorted_ = true;
+    }
+    sorted_ = true;
+  }
+  if (!sorted_) {
+    std::sort(bucket_->begin(), bucket_->end(),
+              stl_wrappers::Compare(compare_));
+    cit_ = bucket_->begin();
+    sorted_ = true;
+  }
+  assert(sorted_);
+  assert(vrep_ == nullptr || vrep_->sorted_);
+}
 
 // Returns true iff the iterator is positioned at a valid node.
 bool UnsortedVectorRep::Iterator::Valid() const {
+  DoSort();
   return cit_ != bucket_->end();
 }
 
 // Returns the key at the current position.
 // REQUIRES: Valid()
-const char* UnsortedVectorRep::Iterator::key() const { return *cit_; }
+const char* UnsortedVectorRep::Iterator::key() const {
+  assert(sorted_);
+  return *cit_;
+}
 
 // Advances to the next greater key position.
 // REQUIRES: Valid()
-//
-// Unsorted vector performs O(N) scan to find the
-// smallest key strictly greater than target key
 void UnsortedVectorRep::Iterator::Next() {
-  if (cit_ == bucket_->end()) return;
-
-  const char* current_key = *cit_;
-  auto best_candidate = bucket_->end();
-
-  // Linear scan to find logical successor
-  for (auto it = bucket_->begin(); it != bucket_->end(); ++it) {
-    if (compare_(*it, current_key) > 0) {
-      if (best_candidate == bucket_->end() ||
-          compare_(*it, *best_candidate) < 0) {
-        best_candidate = it;
-      }
-    }
+  assert(sorted_);
+  if (cit_ == bucket_->end()) {
+    return;
   }
-  cit_ = best_candidate;
+  ++cit_;
 }
 
 // Advances to the previous smaller key position.
 // REQUIRES: Valid()
-//
-// Unsorted vector performs O(N) scan to find the
-// largest key strictly smaller than target key.
 void UnsortedVectorRep::Iterator::Prev() {
-  if (cit_ == bucket_->end()) {
-    SeekToLast();
-    return;
+  assert(sorted_);
+  if (cit_ == bucket_->begin()) {
+    // If you try to go back from the first element, the iterator should be
+    // invalidated. So we set it to past-the-end. This means that you can
+    // treat the container circularly.
+    cit_ = bucket_->end();
+  } else {
+    --cit_;
   }
+}
 
-  const char* current_key = *cit_;
-  auto best_candidate = bucket_->end();
-
-  // Linear scan to find logical predecessor
-  for (auto it = bucket_->begin(); it != bucket_->end(); ++it) {
-    if (compare_(*it, current_key) < 0) {
-      if (best_candidate == bucket_->end() ||
-          compare_(*it, *best_candidate) > 0) {
-        best_candidate = it;
-      }
-    }
-  }
-  cit_ = best_candidate;
+// Advance to the first entry with a key >= target
+void UnsortedVectorRep::Iterator::Seek(const Slice& user_key,
+                                       const char* memtable_key) {
+  DoSort();
+  // Do binary search to find first value not less than the target
+  const char* encoded_key =
+      (memtable_key != nullptr) ? memtable_key : EncodeKey(&tmp_, user_key);
+  cit_ = std::equal_range(bucket_->begin(), bucket_->end(), encoded_key,
+                          [this](const char* a, const char* b) {
+                            return compare_(a, b) < 0;
+                          })
+             .first;
 }
 
 // Advance to the first entry with a key >= target
 //
 // Unsorted vector performs O(N) scan to find the target key
-void UnsortedVectorRep::Iterator::Seek(const Slice& user_key,
-                                       const char* memtable_key) {
+void UnsortedVectorRep::Iterator::SeekGet(const Slice& user_key,
+                                          const char* memtable_key) {
   const char* encoded_key =
       (memtable_key != nullptr) ? memtable_key : EncodeKey(&tmp_, user_key);
 
-  auto best_candidate = bucket_->end();
-
-  for (auto it = bucket_->begin(); it != bucket_->end(); ++it) {
-    if (compare_(*it, encoded_key) >= 0) {
-      if (compare_(*it, encoded_key) == 0) {
-        cit_ = it;
-        return;
-      }
-      if (best_candidate == bucket_->end() ||
-          compare_(*it, *best_candidate) < 0) {
-        best_candidate = it;
-      }
+  // Start from the end and scan backward
+  for (auto it = bucket_->rbegin(); it != bucket_->rend(); ++it) {
+    if (compare_(*it, encoded_key) == 0) {
+      cit_ = it.base() - 1;
+      return;
     }
   }
-  cit_ = best_candidate;
+
+  cit_ = bucket_->end();
 }
 
 Status UnsortedVectorRep::Iterator::SeekAndValidate(
@@ -294,50 +311,26 @@ Status UnsortedVectorRep::Iterator::SeekAndValidate(
 }
 
 // Advance to the first entry with a key <= target
-//
-// Unsorted vector performs O(N) scan to find the target key.
 void UnsortedVectorRep::Iterator::SeekForPrev(const Slice& user_key,
                                               const char* memtable_key) {
-  const char* encoded_key =
-      (memtable_key != nullptr) ? memtable_key : EncodeKey(&tmp_, user_key);
-
-  auto best_candidate = bucket_->end();
-
-  for (auto it = bucket_->begin(); it != bucket_->end(); ++it) {
-    if (compare_(*it, encoded_key) <= 0) {
-      if (best_candidate == bucket_->end() ||
-          compare_(*it, *best_candidate) > 0) {
-        best_candidate = it;
-      }
-    }
-  }
-  cit_ = best_candidate;
+  assert(false);
 }
 
 // Position at the first entry in collection.
 // Final state of iterator is Valid() iff collection is not empty.
 void UnsortedVectorRep::Iterator::SeekToFirst() {
-  auto best_candidate = bucket_->end();
-  for (auto it = bucket_->begin(); it != bucket_->end(); ++it) {
-    if (best_candidate == bucket_->end() ||
-        compare_(*it, *best_candidate) < 0) {
-      best_candidate = it;
-    }
-  }
-  cit_ = best_candidate;
+  DoSort();
+  cit_ = bucket_->begin();
 }
 
 // Position at the last entry in collection.
 // Final state of iterator is Valid() iff collection is not empty.
 void UnsortedVectorRep::Iterator::SeekToLast() {
-  auto best_candidate = bucket_->end();
-  for (auto it = bucket_->begin(); it != bucket_->end(); ++it) {
-    if (best_candidate == bucket_->end() ||
-        compare_(*it, *best_candidate) > 0) {
-      best_candidate = it;
-    }
+  DoSort();
+  cit_ = bucket_->end();
+  if (bucket_->size() != 0) {
+    --cit_;
   }
-  cit_ = best_candidate;
 }
 
 void UnsortedVectorRep::Get(const LookupKey& k, void* callback_args,
@@ -356,7 +349,7 @@ void UnsortedVectorRep::Get(const LookupKey& k, void* callback_args,
                                    compare_);
   rwlock_.ReadUnlock();
 
-  for (iter.Seek(k.user_key(), k.memtable_key().data());
+  for (iter.SeekGet(k.user_key(), k.memtable_key().data());
        iter.Valid() && callback_func(callback_args, iter.key()); iter.Next()) {
   }
 }
