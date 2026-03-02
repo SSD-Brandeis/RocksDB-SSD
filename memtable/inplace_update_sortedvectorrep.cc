@@ -1,0 +1,428 @@
+//  Custom implementation from SSD-Lab
+//
+//  InPlaceUpdateSortedVectorRep is a MemTableRep implementation that uses a
+//  sorted vector. It is useful for workloads where ingestion is heavy and
+//  lookups are rare.
+//
+#include <algorithm>
+#include <memory>
+#include <set>
+#include <type_traits>
+#include <unordered_set>
+#include <iostream>
+
+#include "db/memtable.h"
+#include "memory/arena.h"
+#include "memtable/stl_wrappers.h"
+#include "port/port.h"
+#include "rocksdb/memtablerep.h"
+#include "rocksdb/utilities/options_type.h"
+#include "util/mutexlock.h"
+
+namespace ROCKSDB_NAMESPACE {
+namespace {
+class InPlaceUpdateSortedVectorRep : public MemTableRep {
+ public:
+  InPlaceUpdateSortedVectorRep(const KeyComparator& compare,
+                               Allocator* allocator, size_t count);
+
+  // Insert key into the collection. (The caller will pack key and value into a
+  // single buffer and pass that in as the parameter to Insert)
+  // REQUIRES: nothing that compares equal to key is currently in the
+  // collection.
+  void Insert(KeyHandle handle) override;
+
+  void InsertConcurrently(KeyHandle handle) override;
+
+  // Returns true iff an entry that compares equal to key is in the collection.
+  bool Contains(const char* key) const override;
+
+  void MarkReadOnly() override;
+
+  size_t ApproximateMemoryUsage() override;
+
+  void Get(const LookupKey& k, void* callback_args,
+           bool (*callback_func)(void* arg, const char* entry)) override;
+
+  void BatchPostProcess() override;
+
+  ~InPlaceUpdateSortedVectorRep() override = default;
+  class Iterator : public MemTableRep::Iterator {
+    class InPlaceUpdateSortedVectorRep* vrep_;
+    std::shared_ptr<std::vector<const char*>> bucket_;
+    std::vector<const char*>::const_iterator mutable cit_;
+    const KeyComparator& compare_;
+    std::string tmp_;  // For passing to EncodeKey
+
+   public:
+    explicit Iterator(class InPlaceUpdateSortedVectorRep* vrep,
+                      std::shared_ptr<std::vector<const char*>> bucket,
+                      const KeyComparator& compare);
+
+    // Initialize an iterator over the specified collection.
+    // The returned iterator is not valid.
+    // explicit Iterator(const MemTableRep* collection);
+    ~Iterator() override = default;
+
+    // Returns true iff the iterator is positioned at a valid node.
+    bool Valid() const override;
+
+    // Returns the key at the current position.
+    // REQUIRES: Valid()
+    const char* key() const override;
+
+    // Advances to the next position.
+    // REQUIRES: Valid()
+    void Next() override;
+
+    // Advances to the previous position.
+    // REQUIRES: Valid()
+    void Prev() override;
+
+    // Advance to the first entry with a key >= target
+    void Seek(const Slice& user_key, const char* memtable_key) override;
+
+    // Seek and do some memory validation
+    Status SeekAndValidate(const Slice& internal_key, const char* memtable_key,
+                           bool allow_data_in_errors,
+                           bool detect_key_out_of_order,
+                           const std::function<Status(const char*, bool)>&
+                               key_validation_callback) override;
+
+    // Advance to the first entry with a key <= target
+    void SeekForPrev(const Slice& user_key, const char* memtable_key) override;
+
+    // Position at the first entry in collection.
+    // Final state of iterator is Valid() iff collection is not empty.
+    void SeekToFirst() override;
+
+    // Position at the last entry in collection.
+    // Final state of iterator is Valid() iff collection is not empty.
+    void SeekToLast() override;
+  };
+
+  // Return an iterator over the keys in this representation.
+  MemTableRep::Iterator* GetIterator(Arena* arena) override;
+
+ private:
+  friend class Iterator;
+  ALIGN_AS(CACHE_LINE_SIZE) RelaxedAtomic<size_t> bucket_size_;
+  using Bucket = std::vector<const char*>;
+  std::shared_ptr<Bucket> bucket_;
+  mutable port::RWMutex rwlock_;
+  bool immutable_;
+  const KeyComparator& compare_;
+  // Thread-local vector to buffer concurrent writes.
+  using TlBucket = std::vector<const char*>;
+  ThreadLocalPtr tl_writes_;
+
+  static void DeleteTlBucket(void* ptr) {
+    auto* v = static_cast<TlBucket*>(ptr);
+    delete v;
+  }
+};
+
+
+// void InPlaceUpdateSortedVectorRep::Insert(KeyHandle handle) {
+//   auto* key = static_cast<char*>(handle);
+//   bool inserted = false;
+
+//   {
+//     WriteLock l(&rwlock_);
+//     assert(!immutable_);
+
+    
+//     const auto position = std::lower_bound(
+//         bucket_->begin(), bucket_->end(), key,
+//         [this](const char* a, const char* b) { return compare_(a, b) < 0; });
+//     // printf("INSERTING KEY: %s\n", key);
+//     // This compares Internal Keys: [UserKey][Seq][Type]
+//     if (position != bucket_->end() && compare_(*position, key) == 0) {
+//       //inplace udpate
+//       *position = key;
+//     } else {
+//       bucket_->insert(position, key);
+//       inserted = true;
+//     }
+//   }
+
+//   if (inserted) {
+//     bucket_size_.FetchAddRelaxed(1);
+//   }
+// };
+
+void InPlaceUpdateSortedVectorRep::Insert(KeyHandle handle) {
+  auto* key = static_cast<char*>(handle);
+  bool inserted = false;
+
+  {
+    WriteLock l(&rwlock_);
+    assert(!immutable_);
+
+    
+    const auto position = std::lower_bound(
+        bucket_->begin(), bucket_->end(), key,
+        [this](const char* a, const char* b) { return compare_(a, b) < 0; });
+
+    // 2. use user key, no seq number
+    bool is_same_user_key = false;
+    if (position != bucket_->end()) {
+      // only get the User Key 
+      // existing_user_key = compare_.user_comparator()->ExtractUserKey(*position);
+      
+      Slice existing_user_key = ExtractUserKey(*position);
+      Slice new_user_key = ExtractUserKey(key);
+
+      
+      // std::cout << "existing user key: "<<  existing_user_key.ToString()<<std::endl<<std::flush;
+      // std::cout << "new user key: "<<  new_user_key.ToString()<<std::endl<<std::flush;
+      // user key, no seq number
+      if (existing_user_key.compare(new_user_key) == 0) {
+        is_same_user_key = true;
+      }
+    }
+
+    if (is_same_user_key) {
+     
+      *position = key;
+      this->last_insert_is_update_ = true; 
+      //  printf("same key: %d ", is_same_user_key);
+    } else {
+ 
+      bucket_->insert(position, key);
+      inserted = true;
+      //  printf("diff key: %d ", is_same_user_key);
+      this->last_insert_is_update_ = false;
+    }
+  }
+
+  if (inserted) {
+    bucket_size_.FetchAddRelaxed(1);
+  }
+};
+
+
+
+
+
+
+void InPlaceUpdateSortedVectorRep::InsertConcurrently(KeyHandle handle) {
+  auto* v = static_cast<TlBucket*>(tl_writes_.Get());
+  if (!v) {
+    v = new TlBucket();
+    tl_writes_.Reset(v);
+    v->push_back(static_cast<char*>(handle));
+  } else {
+    const auto position = std::lower_bound(
+        v->begin(), v->end(), static_cast<char*>(handle),
+        [this](const char* a, const char* b) { return compare_(a, b) < 0; });
+    v->insert(position, static_cast<char*>(handle));
+  }
+}
+
+bool InPlaceUpdateSortedVectorRep::Contains(const char* key) const {
+  ReadLock l(&rwlock_);
+  auto it = std::lower_bound(
+      bucket_->begin(), bucket_->end(), key,
+      [this](const char* a, const char* b) { return compare_(a, b) < 0; });
+  return it != bucket_->end() && compare_(*it, key) == 0;
+}
+
+void InPlaceUpdateSortedVectorRep::MarkReadOnly() {
+  WriteLock l(&rwlock_);
+  immutable_ = true;
+}
+
+size_t InPlaceUpdateSortedVectorRep::ApproximateMemoryUsage() {
+  return bucket_size_.LoadRelaxed() *
+         sizeof(std::remove_reference<decltype(*bucket_)>::type::value_type);
+}
+
+void InPlaceUpdateSortedVectorRep::BatchPostProcess() {
+  auto* v = static_cast<TlBucket*>(tl_writes_.Get());
+  if (v) {
+    WriteLock l(&rwlock_);
+    assert(!immutable_);
+    std::vector<const char*> merged;
+    merged.reserve(bucket_->size() + v->size());
+
+    std::merge(
+        bucket_->begin(), bucket_->end(), v->begin(), v->end(),
+        std::back_inserter(merged),
+        [this](const char* a, const char* b) { return compare_(a, b) < 0; });
+
+    bucket_->swap(merged);
+  }
+  bucket_size_.FetchAddRelaxed(v->size());
+  delete v;
+  tl_writes_.Reset(nullptr);
+}
+
+InPlaceUpdateSortedVectorRep::InPlaceUpdateSortedVectorRep(
+    const KeyComparator& compare, Allocator* allocator, size_t count)
+    : MemTableRep(allocator),
+      bucket_size_(0),
+      bucket_(new Bucket()),
+      immutable_(false),
+      compare_(compare),
+      tl_writes_(DeleteTlBucket) {
+  bucket_.get()->reserve(count);
+}
+
+InPlaceUpdateSortedVectorRep::Iterator::Iterator(
+    class InPlaceUpdateSortedVectorRep* vrep,
+    std::shared_ptr<std::vector<const char*>> bucket,
+    const KeyComparator& compare)
+    : vrep_(vrep), bucket_(bucket), cit_(bucket_->end()), compare_(compare) {}
+
+// Returns true iff the iterator is positioned at a valid node.
+bool InPlaceUpdateSortedVectorRep::Iterator::Valid() const {
+  return cit_ != bucket_->end();
+}
+
+// Returns the key at the current position.
+// REQUIRES: Valid()
+const char* InPlaceUpdateSortedVectorRep::Iterator::key() const {
+  return *cit_;
+}
+
+// Advances to the next greater key position.
+// REQUIRES: Valid()
+//
+// Sorted vector can just move to the next position
+void InPlaceUpdateSortedVectorRep::Iterator::Next() {
+  if (cit_ == bucket_->end()) {
+    return;
+  }
+  ++cit_;
+}
+
+// Advances to the previous smaller key position.
+// REQUIRES: Valid()
+//
+// Sorted vector can just move to the previous position
+void InPlaceUpdateSortedVectorRep::Iterator::Prev() {
+  if (cit_ == bucket_->begin()) {
+    cit_ = bucket_->end();
+  } else {
+    --cit_;
+  }
+}
+
+// Advance to the first entry with a key >= target
+void InPlaceUpdateSortedVectorRep::Iterator::Seek(const Slice& user_key,
+                                                  const char* memtable_key) {
+  const char* encoded_key =
+      (memtable_key != nullptr) ? memtable_key : EncodeKey(&tmp_, user_key);
+  cit_ = std::equal_range(bucket_->begin(), bucket_->end(), encoded_key,
+                          [this](const char* a, const char* b) {
+                            return compare_(a, b) < 0;
+                          })
+             .first;
+}
+
+Status InPlaceUpdateSortedVectorRep::Iterator::SeekAndValidate(
+    const Slice& /* internal_key */, const char* /* memtable_key */,
+    bool /* allow_data_in_errors */, bool /* detect_key_out_of_order */,
+    const std::function<Status(const char*, bool)>&
+    /* key_validation_callback */) {
+  if (vrep_) {
+    WriteLock l(&vrep_->rwlock_);
+    if (bucket_->begin() == bucket_->end()) {
+      // Memtable is empty
+      return Status::OK();
+    } else {
+      return Status::NotSupported("SeekAndValidate() not implemented");
+    }
+  } else {
+    return Status::NotSupported("SeekAndValidate() not implemented");
+  }
+}
+
+// Advance to the first entry with a key <= target
+void InPlaceUpdateSortedVectorRep::Iterator::SeekForPrev(
+    const Slice& internal_key, const char* memtable_key) {
+  assert(false);
+}
+
+// Position at the first entry in collection.
+// Final state of iterator is Valid() iff collection is not empty.
+void InPlaceUpdateSortedVectorRep::Iterator::SeekToFirst() {
+  cit_ = bucket_->begin();
+}
+
+// Position at the last entry in collection.
+// Final state of iterator is Valid() iff collection is not empty.
+void InPlaceUpdateSortedVectorRep::Iterator::SeekToLast() {
+  cit_ = bucket_->end();
+  if (bucket_->size() != 0) {
+    --cit_;
+  }
+}
+
+void InPlaceUpdateSortedVectorRep::Get(
+    const LookupKey& k, void* callback_args,
+    bool (*callback_func)(void* arg, const char* entry)) {
+  rwlock_.ReadLock();
+  InPlaceUpdateSortedVectorRep* vector_rep;
+  std::shared_ptr<Bucket> bucket;
+  if (immutable_) {
+    vector_rep = this;
+  } else {
+    vector_rep = nullptr;
+    bucket.reset(new Bucket(*bucket_));  // make a copy
+  }
+
+  InPlaceUpdateSortedVectorRep::Iterator iter(vector_rep, bucket, compare_);
+  rwlock_.ReadUnlock();
+
+  for (iter.Seek(k.user_key(), k.memtable_key().data());
+       iter.Valid() && callback_func(callback_args, iter.key()); iter.Next()) {
+  }
+}
+
+MemTableRep::Iterator* InPlaceUpdateSortedVectorRep::GetIterator(Arena* arena) {
+  char* mem = nullptr;
+  if (arena != nullptr) {
+    mem = arena->AllocateAligned(sizeof(Iterator));
+  }
+  ReadLock l(&rwlock_);
+  if (immutable_) {
+    if (arena == nullptr) {
+      return new Iterator(this, bucket_, compare_);
+    } else {
+      return new (mem) Iterator(this, bucket_, compare_);
+    }
+  } else {
+    std::shared_ptr<Bucket> tmp;
+    tmp.reset(new Bucket(*bucket_));  // make a copy
+    if (arena == nullptr) {
+      return new Iterator(nullptr, tmp, compare_);
+    } else {
+      return new (mem) Iterator(nullptr, tmp, compare_);
+    }
+  }
+}
+}  // namespace
+
+static std::unordered_map<std::string, OptionTypeInfo>
+    in_place_update_sorted_vector_rep_table_info = {
+        {"count",
+         {0, OptionType::kSizeT, OptionVerificationType::kNormal,
+          OptionTypeFlags::kNone}},
+};
+
+InPlaceUpdateSortedVectorRepFactory::InPlaceUpdateSortedVectorRepFactory(
+    size_t count)
+    : count_(count) {
+  RegisterOptions("InPlaceUpdateSortedVectorRepFactory", &count_,
+                  &in_place_update_sorted_vector_rep_table_info);
+}
+
+MemTableRep* InPlaceUpdateSortedVectorRepFactory::CreateMemTableRep(
+    const MemTableRep::KeyComparator& compare, Allocator* allocator,
+    const SliceTransform*, Logger* /* logger */) {
+  return new InPlaceUpdateSortedVectorRep(compare, allocator, count_);
+}
+
+}  // namespace ROCKSDB_NAMESPACE

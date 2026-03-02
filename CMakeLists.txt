@@ -812,6 +812,7 @@ set(SOURCES
         memtable/skiplistrep.cc
         memtable/simpleskiplistrep.cc
         memtable/vectorrep.cc
+        memtable/inplace_update_sortedvectorrep.cc
         memtable/sortedvectorrep.cc
         memtable/unsortedvectorrep.cc
         memtable/linklistrep.cc

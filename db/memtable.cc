@@ -1011,9 +1011,11 @@ Status MemTable::Add(SequenceNumber s, ValueType type,
     }
 
     // this is a bit ugly, but is the way to avoid locked instructions
-    // when incrementing an atomic
-    num_entries_.StoreRelaxed(num_entries_.LoadRelaxed() + 1);
-    data_size_.StoreRelaxed(data_size_.LoadRelaxed() + encoded_len);
+    // when incrementing an atomic (modified)
+  if (!table->last_insert_is_update_) {
+      num_entries_.StoreRelaxed(num_entries_.LoadRelaxed() + 1);
+      data_size_.StoreRelaxed(data_size_.LoadRelaxed() + encoded_len);
+    }
     if (type == kTypeDeletion || type == kTypeSingleDeletion ||
         type == kTypeDeletionWithTimestamp) {
       num_deletes_.StoreRelaxed(num_deletes_.LoadRelaxed() + 1);

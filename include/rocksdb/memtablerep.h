@@ -60,9 +60,11 @@ using KeyHandle = void*;
 Slice GetLengthPrefixedSlice(const char* data);
 
 class MemTableRep {
+
  public:
   // KeyComparator provides a means to compare keys, which are internal keys
   // concatenated with values.
+  bool last_insert_is_update_ = false;
   class KeyComparator {
    public:
     using DecodedType = ROCKSDB_NAMESPACE::Slice;
@@ -469,14 +471,24 @@ MemTableRepFactory* NewHashLinkListRepFactory(
     bool if_log_bucket_dist_when_flash = true,
     uint32_t threshold_use_skiplist = 256);
 
-// This creates MemTableReps that are backed by an std::vector. On iteration,
-// the vector is *not* sorted, as opposed to `VectorRep`. This is useful for
-// workloads where iteration doesn't happen.
-//
-// Parameters:
-//   count: Passed to the constructor of the underlying std::vector of each
-//     UnsortedVectorRep. On initialization, the underlying array will be
-//     at least count bytes reserved for usage.
+class InPlaceUpdateSortedVectorRepFactory : public MemTableRepFactory {
+  size_t count_;
+
+ public:
+  explicit InPlaceUpdateSortedVectorRepFactory(size_t count = 0);
+
+ 
+  static const char* kClassName() { return "InPlaceUpdateSortedVectorRepFactory"; }
+  static const char* kNickName() { return "inplace_update_sorted_vector"; }
+  const char* Name() const override { return kClassName(); }
+  const char* NickName() const override { return kNickName(); }
+
+  using MemTableRepFactory::CreateMemTableRep;
+  MemTableRep* CreateMemTableRep(const MemTableRep::KeyComparator&, Allocator*,
+                                 const SliceTransform*,
+                                 Logger* logger) override;
+  bool IsInsertConcurrentlySupported() const override { return true; }
+};
 class UnsortedVectorRepFactory : public MemTableRepFactory {
   size_t count_;
 
