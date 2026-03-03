@@ -181,10 +181,11 @@ void InPlaceUpdateSortedVectorRep::Insert(KeyHandle handle) {
     }
 
     if (is_same_user_key) {
-      Arena* arena = static_cast<Arena*>(allocator_);
-      if (arena != nullptr) {
-        arena->DecrementBlocksMemory(8396564);
-      }
+      // Arena* arena = static_cast<Arena*>(allocator_);
+      // if (arena != nullptr) {
+      //   printf("called arena");
+      //   arena->DecrementBlocksMemory(0);
+      // }
 
       *position = key;
       this->last_insert_is_update_ = true;
@@ -356,21 +357,22 @@ void InPlaceUpdateSortedVectorRep::Iterator::SeekToLast() {
     --cit_;
   }
 }
-
 void InPlaceUpdateSortedVectorRep::Get(
     const LookupKey& k, void* callback_args,
     bool (*callback_func)(void* arg, const char* entry)) {
   rwlock_.ReadLock();
   InPlaceUpdateSortedVectorRep* vector_rep;
-  std::shared_ptr<Bucket> bucket;
+  std::shared_ptr<Bucket> local_bucket; 
+
   if (immutable_) {
     vector_rep = this;
+    local_bucket = bucket_;  // <-- The fix is still here!
   } else {
     vector_rep = nullptr;
-    bucket.reset(new Bucket(*bucket_));  // make a copy
+    local_bucket.reset(new Bucket(*bucket_));  // make a copy
   }
 
-  InPlaceUpdateSortedVectorRep::Iterator iter(vector_rep, bucket, compare_);
+  InPlaceUpdateSortedVectorRep::Iterator iter(vector_rep, local_bucket, compare_);
   rwlock_.ReadUnlock();
 
   for (iter.Seek(k.user_key(), k.memtable_key().data());
