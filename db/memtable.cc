@@ -182,6 +182,7 @@ size_t MemTable::ApproximateMemoryUsage() {
   for (size_t usage : usages) {
     // If usage + total_usage >= kMaxSizet, return kMaxSizet.
     // the following variation is to avoid numeric overflow.
+    printf("USAGE here is: %ld\n", usage);
     if (usage >= std::numeric_limits<size_t>::max() - total_usage) {
       return std::numeric_limits<size_t>::max();
     }
@@ -1012,7 +1013,7 @@ Status MemTable::Add(SequenceNumber s, ValueType type,
 
     // this is a bit ugly, but is the way to avoid locked instructions
     // when incrementing an atomic (modified)
-  if (!table->last_insert_is_update_) {
+    if (!table->last_insert_is_update_) {
       num_entries_.StoreRelaxed(num_entries_.LoadRelaxed() + 1);
       data_size_.StoreRelaxed(data_size_.LoadRelaxed() + encoded_len);
     }
@@ -1467,7 +1468,7 @@ bool MemTable::Get(const LookupKey& key, std::string* value,
     GetFromTable(key, *max_covering_tombstone_seq, do_merge, callback,
                  is_blob_index, value, columns, timestamp, s, merge_context,
                  seq, &found_final_value, &merge_in_progress);
-}
+  }
 
   // No change to value, since we have not yet found a Put/Delete
   // Propagate corruption error

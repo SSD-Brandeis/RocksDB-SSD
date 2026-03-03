@@ -5,11 +5,11 @@
 //  lookups are rare.
 //
 #include <algorithm>
+#include <iostream>
 #include <memory>
 #include <set>
 #include <type_traits>
 #include <unordered_set>
-#include <iostream>
 
 #include "db/memtable.h"
 #include "memory/arena.h"
@@ -122,7 +122,6 @@ class InPlaceUpdateSortedVectorRep : public MemTableRep {
   }
 };
 
-
 // void InPlaceUpdateSortedVectorRep::Insert(KeyHandle handle) {
 //   auto* key = static_cast<char*>(handle);
 //   bool inserted = false;
@@ -131,7 +130,6 @@ class InPlaceUpdateSortedVectorRep : public MemTableRep {
 //     WriteLock l(&rwlock_);
 //     assert(!immutable_);
 
-    
 //     const auto position = std::lower_bound(
 //         bucket_->begin(), bucket_->end(), key,
 //         [this](const char* a, const char* b) { return compare_(a, b) < 0; });
@@ -159,7 +157,6 @@ void InPlaceUpdateSortedVectorRep::Insert(KeyHandle handle) {
     WriteLock l(&rwlock_);
     assert(!immutable_);
 
-    
     const auto position = std::lower_bound(
         bucket_->begin(), bucket_->end(), key,
         [this](const char* a, const char* b) { return compare_(a, b) < 0; });
@@ -167,28 +164,33 @@ void InPlaceUpdateSortedVectorRep::Insert(KeyHandle handle) {
     // 2. use user key, no seq number
     bool is_same_user_key = false;
     if (position != bucket_->end()) {
-      // only get the User Key 
-      // existing_user_key = compare_.user_comparator()->ExtractUserKey(*position);
-      
+      // only get the User Key
+      // existing_user_key =
+      // compare_.user_comparator()->ExtractUserKey(*position);
+
       Slice existing_user_key = ExtractUserKey(*position);
       Slice new_user_key = ExtractUserKey(key);
 
-      
-      // std::cout << "existing user key: "<<  existing_user_key.ToString()<<std::endl<<std::flush;
-      // std::cout << "new user key: "<<  new_user_key.ToString()<<std::endl<<std::flush;
-      // user key, no seq number
+      // std::cout << "existing user key: "<<
+      // existing_user_key.ToString()<<std::endl<<std::flush; std::cout << "new
+      // user key: "<<  new_user_key.ToString()<<std::endl<<std::flush; user
+      // key, no seq number
       if (existing_user_key.compare(new_user_key) == 0) {
         is_same_user_key = true;
       }
     }
 
     if (is_same_user_key) {
-     
+      Arena* arena = static_cast<Arena*>(allocator_);
+      if (arena != nullptr) {
+        arena->DecrementBlocksMemory(8396564);
+      }
+
       *position = key;
-      this->last_insert_is_update_ = true; 
-      //  printf("same key: %d ", is_same_user_key);
+      this->last_insert_is_update_ = true;
+
+      //  printf("same key: %d ", is_same_user_key)
     } else {
- 
       bucket_->insert(position, key);
       inserted = true;
       //  printf("diff key: %d ", is_same_user_key);
@@ -200,11 +202,6 @@ void InPlaceUpdateSortedVectorRep::Insert(KeyHandle handle) {
     bucket_size_.FetchAddRelaxed(1);
   }
 };
-
-
-
-
-
 
 void InPlaceUpdateSortedVectorRep::InsertConcurrently(KeyHandle handle) {
   auto* v = static_cast<TlBucket*>(tl_writes_.Get());

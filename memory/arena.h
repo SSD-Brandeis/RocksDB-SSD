@@ -70,6 +70,15 @@ class Arena : public Allocator {
 
   size_t MemoryAllocatedBytes() const { return blocks_memory_; }
 
+  inline void DecrementBlocksMemory(size_t bytes) {
+    if (blocks_memory_ >= bytes) {
+      blocks_memory_ -= bytes;
+      // printf("New value of blocks_memory_ is %ld\n", blocks_memory_);
+    } else {
+      blocks_memory_ = 0;
+    }
+  }
+
   size_t AllocatedAndUnused() const { return alloc_bytes_remaining_; }
 
   // If an allocation is too big, we'll allocate an irregular block with the
