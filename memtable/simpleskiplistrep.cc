@@ -2,19 +2,18 @@
 //
 //  SimpleSkipListRep is a MemTableRep implementation that uses a simple skip list.
 //
-#include <atomic>
+#include <algorithm>
 #include <chrono>
+#include <memory>
 #include <random>
 #include <vector>
 
 #include "db/memtable.h"
 #include "memory/arena.h"
-#include "memtable/inlineskiplist.h"
 #include "port/port.h"
 #include "rocksdb/memtablerep.h"
 #include "rocksdb/utilities/options_type.h"
 #include "util/mutexlock.h"
-#include "util/string_util.h"
 
 namespace ROCKSDB_NAMESPACE {
 namespace {
@@ -37,7 +36,10 @@ class SimpleSkipList {
   SimpleSkipList(const MemTableRep::KeyComparator& compare,
                  Allocator* allocator)
       : compare_(compare), allocator_(allocator), max_height_(1) {
-    head_ = new Node(nullptr);
+    //  Allocate head node directly from RocksDB's Arena
+    char* mem = allocator_->AllocateAligned(sizeof(Node));
+    head_ = new (mem) Node(nullptr);
+
     unsigned int seed = static_cast<unsigned int>(
         std::chrono::system_clock::now().time_since_epoch().count());
     rnd_.seed(seed);
@@ -46,12 +48,7 @@ class SimpleSkipList {
   const MemTableRep::KeyComparator& Compare() const { return compare_; }
 
   ~SimpleSkipList() {
-    Node* curr = head_;
-    while (curr != nullptr) {
-      Node* next = curr->next[0];
-      delete curr;
-      curr = next;
-    }
+    // arena will destroy it, just trust arena or this metadata will be incorrectly small
   }
 
   void Insert(const char* key) {
@@ -79,7 +76,10 @@ class SimpleSkipList {
       max_height_ = height;
     }
 
-    Node* new_node = new Node(key);
+    // FIX 3: Allocate new inserted nodes directly from the Arena
+    char* mem = allocator_->AllocateAligned(sizeof(Node));
+    Node* new_node = new (mem) Node(key);
+
     for (int i = 0; i < height; i++) {
       new_node->next[i] = update[i]->next[i];
       update[i]->next[i] = new_node;
@@ -179,6 +179,7 @@ class SimpleSkipListRep : public MemTableRep {
     return skip_list_.Contains(key);
   }
 
+  //  returns 0 because all are tracked by the Arena 
   size_t ApproximateMemoryUsage() override { return 0; }
 
   void Get(const LookupKey& k, void* callback_args,
@@ -257,7 +258,7 @@ class SimpleSkipListRep : public MemTableRep {
 
   MemTableRep::Iterator* GetIterator(Arena* arena) override {
     if (arena != nullptr) {
-      void* mem = arena->AllocateAligned(sizeof(Iterator));
+      char* mem = arena->AllocateAligned(sizeof(Iterator));
       return new (mem) Iterator(&skip_list_);
     } else {
       return new Iterator(&skip_list_);
