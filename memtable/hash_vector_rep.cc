@@ -1,4 +1,3 @@
-
 #include <algorithm>
 #include <atomic>
 #include <memory>
@@ -13,7 +12,6 @@
 #include "rocksdb/slice_transform.h"
 #include "rocksdb/utilities/options_type.h"
 #include "util/hash.h"
-#include "util/mutexlock.h"
 
 namespace ROCKSDB_NAMESPACE {
 namespace {
@@ -47,23 +45,22 @@ class HashVectorRep : public MemTableRep {
  private:
   friend class DynamicIterator;
 
+  using Bucket = std::vector<const char*>;
+
   size_t bucket_size_;
   std::atomic<size_t> num_entries_{0};
+  
+  // New atomic trackers for exact $O(1)$ memory accounting
+  std::atomic<size_t> num_initialized_buckets_{0};
+  std::atomic<size_t> vector_capacity_bytes_{0};
 
-  struct Bucket {
-    std::shared_ptr<std::vector<const char*>> vec;
-    mutable port::RWMutex rwlock;
-    Bucket() : vec(std::make_shared<std::vector<const char*>>()) {}
-  };
-
-  Bucket* buckets_;
+  std::atomic<Bucket*>* buckets_;
   std::atomic<bool> immutable_;
 
   const SliceTransform* transform_;
   const MemTableRep::KeyComparator& compare_;
 
   Slice GetPrefix(const Slice& internal_key) const {
-    // FIX 1: Safely handle missing prefix extractors
     Slice user_key = ExtractUserKey(internal_key);
     return transform_ ? transform_->Transform(user_key) : user_key;
   }
@@ -72,10 +69,26 @@ class HashVectorRep : public MemTableRep {
     return GetSliceRangedNPHash(slice, bucket_size_);
   }
 
-  Bucket& GetBucket(size_t i) const { return buckets_[i]; }
+  Bucket* GetBucket(size_t i) const { 
+    return buckets_[i].load(std::memory_order_acquire); 
+  }
 
-  Bucket& GetBucket(const Slice& slice) const {
+  Bucket* GetBucket(const Slice& slice) const {
     return GetBucket(GetHash(slice));
+  }
+
+  Bucket* GetInitializedBucket(const Slice& transformed) {
+    size_t hash = GetHash(transformed);
+    Bucket* bucket = GetBucket(hash);
+    if (bucket == nullptr) {
+      auto addr = allocator_->AllocateAligned(sizeof(Bucket));
+      bucket = new (addr) Bucket();
+      buckets_[hash].store(bucket, std::memory_order_release);
+      
+      // track Tnew vector header (maybe 24 bytes) 
+      num_initialized_buckets_.fetch_add(1, std::memory_order_relaxed);
+    }
+    return bucket;
   }
 
   class FullListIterator : public MemTableRep::Iterator {
@@ -106,8 +119,6 @@ class HashVectorRep : public MemTableRep {
     void SeekToLast() override { iter_.SeekToLast(); }
 
    private:
-    // FIX 2: C++ destroys members bottom-to-top.
-    // Iter must be destroyed before the skiplist, and skiplist before the arena.
     std::unique_ptr<Allocator> allocator_;
     std::unique_ptr<MemtableSkipList> full_list_;
     MemtableSkipList::Iterator iter_;
@@ -117,10 +128,10 @@ class HashVectorRep : public MemTableRep {
   class DynamicIterator : public MemTableRep::Iterator {
    public:
     explicit DynamicIterator(const HashVectorRep& memtable_rep)
-        : memtable_rep_(memtable_rep), bucket_vec_(nullptr), cit_() {}
+        : memtable_rep_(memtable_rep), bucket_(nullptr), cit_() {}
 
     bool Valid() const override {
-      return bucket_vec_ != nullptr && cit_ != bucket_vec_->end();
+      return bucket_ != nullptr && cit_ != bucket_->end();
     }
 
     const char* key() const override {
@@ -135,8 +146,8 @@ class HashVectorRep : public MemTableRep {
 
     void Prev() override {
       assert(Valid());
-      if (cit_ == bucket_vec_->begin()) {
-        cit_ = bucket_vec_->end();
+      if (cit_ == bucket_->begin()) {
+        cit_ = bucket_->end();
       } else {
         --cit_;
       }
@@ -144,21 +155,17 @@ class HashVectorRep : public MemTableRep {
 
     void Seek(const Slice& k, const char* memtable_key) override {
       auto transformed = memtable_rep_.GetPrefix(k);
-      Bucket& bucket = memtable_rep_.GetBucket(transformed);
-
-      {
-        ReadLock l(&bucket.rwlock);
-        if (memtable_rep_.immutable_.load(std::memory_order_relaxed)) {
-          bucket_vec_ = bucket.vec;
-        } else {
-          bucket_vec_.reset(new std::vector<const char*>(*bucket.vec));
-        }
+      bucket_ = memtable_rep_.GetBucket(transformed);
+      
+      if (bucket_ == nullptr) {
+        return;
       }
 
       const char* encoded_key =
           (memtable_key != nullptr) ? memtable_key : EncodeKey(&tmp_, k);
+      
       cit_ = std::lower_bound(
-          bucket_vec_->begin(), bucket_vec_->end(), encoded_key,
+          bucket_->begin(), bucket_->end(), encoded_key,
           [this](const char* a, const char* b) {
             return memtable_rep_.compare_(a, b) < 0;
           });
@@ -166,17 +173,17 @@ class HashVectorRep : public MemTableRep {
 
     void SeekForPrev(const Slice& /*k*/,
                      const char* /*memtable_key*/) override {
-      bucket_vec_.reset();
+      bucket_ = nullptr;
     }
 
-    void SeekToFirst() override { bucket_vec_.reset(); }
+    void SeekToFirst() override { bucket_ = nullptr; }
 
-    void SeekToLast() override { bucket_vec_.reset(); }
+    void SeekToLast() override { bucket_ = nullptr; }
 
    private:
     const HashVectorRep& memtable_rep_;
-    std::shared_ptr<std::vector<const char*>> bucket_vec_;
-    std::vector<const char*>::const_iterator cit_;
+    const Bucket* bucket_;
+    Bucket::const_iterator cit_;
     std::string tmp_;
   };
 };
@@ -187,55 +194,82 @@ HashVectorRep::HashVectorRep(const MemTableRep::KeyComparator& compare,
                              size_t bucket_size)
     : MemTableRep(allocator),
       bucket_size_(bucket_size),
-      buckets_(new Bucket[bucket_size]),
       immutable_(false),
       transform_(transform),
-      compare_(compare) {}
+      compare_(compare) {
+  auto mem = allocator->AllocateAligned(sizeof(std::atomic<Bucket*>) * bucket_size);
+  buckets_ = reinterpret_cast<std::atomic<Bucket*>*>(mem);
+  
+  for (size_t i = 0; i < bucket_size_; ++i) {
+    new (&buckets_[i]) std::atomic<Bucket*>(nullptr);
+  }
+}
 
-HashVectorRep::~HashVectorRep() { delete[] buckets_; }
+HashVectorRep::~HashVectorRep() = default;
 
 void HashVectorRep::Insert(KeyHandle handle) {
   auto* key = static_cast<char*>(handle);
   Slice internal_key = GetLengthPrefixedSlice(key);
   auto transformed = GetPrefix(internal_key);
-  Bucket& bucket = GetBucket(transformed);
+  Bucket* bucket = GetInitializedBucket(transformed);
 
-  WriteLock l(&bucket.rwlock);
+  // Capture capacity before insertion
+  size_t old_capacity = bucket->capacity();
+
   const auto position = std::lower_bound(
-      bucket.vec->begin(), bucket.vec->end(), key,
+      bucket->begin(), bucket->end(), key,
       [this](const char* a, const char* b) { return compare_(a, b) < 0; });
-  bucket.vec->insert(position, key);
+  bucket->insert(position, key);
   
-  // FIX 3: Track entries atomically
+  // Capture capacity after insertion and track if a reallocation occurred
+  size_t new_capacity = bucket->capacity();
+  if (new_capacity > old_capacity) {
+    size_t capacity_diff = (new_capacity - old_capacity) * sizeof(const char*);
+    vector_capacity_bytes_.fetch_add(capacity_diff, std::memory_order_relaxed);
+  }
+  
   num_entries_.fetch_add(1, std::memory_order_relaxed);
 }
 
 bool HashVectorRep::Contains(const char* key) const {
   Slice internal_key = GetLengthPrefixedSlice(key);
   auto transformed = GetPrefix(internal_key);
-  Bucket& bucket = GetBucket(transformed);
+  Bucket* bucket = GetBucket(transformed);
+  
+  if (bucket == nullptr) {
+    return false;
+  }
 
-  ReadLock l(&bucket.rwlock);
   auto it = std::lower_bound(
-      bucket.vec->begin(), bucket.vec->end(), key,
+      bucket->begin(), bucket->end(), key,
       [this](const char* a, const char* b) { return compare_(a, b) < 0; });
-  return it != bucket.vec->end() && compare_(*it, key) == 0;
+  return it != bucket->end() && compare_(*it, key) == 0;
 }
 
-size_t HashVectorRep::ApproximateMemoryUsage()  { return 0; }
+size_t HashVectorRep::ApproximateMemoryUsage() { 
+  size_t pointer_array_memory = bucket_size_ * sizeof(std::atomic<Bucket*>);
+  
+  size_t bucket_headers_memory = num_initialized_buckets_.load(std::memory_order_relaxed) * sizeof(Bucket);
+  
+  size_t vector_buffers_memory = vector_capacity_bytes_.load(std::memory_order_relaxed);
+  
+  return pointer_array_memory + bucket_headers_memory + vector_buffers_memory;
+}
 
 void HashVectorRep::Get(const LookupKey& k, void* callback_args,
                         bool (*callback_func)(void* arg, const char* entry)) {
-  // FIX 1: Safely handle missing prefix extractors
   auto transformed = transform_ ? transform_->Transform(k.user_key()) : k.user_key();
-  Bucket& bucket = GetBucket(transformed);
+  Bucket* bucket = GetBucket(transformed);
+  
+  if (bucket == nullptr) {
+    return;
+  }
 
-  ReadLock l(&bucket.rwlock);
   auto it = std::lower_bound(
-      bucket.vec->begin(), bucket.vec->end(), k.memtable_key().data(),
+      bucket->begin(), bucket->end(), k.memtable_key().data(),
       [this](const char* a, const char* b) { return compare_(a, b) < 0; });
 
-  for (; it != bucket.vec->end(); ++it) {
+  for (; it != bucket->end(); ++it) {
     if (!callback_func(callback_args, *it)) {
       break;
     }
@@ -247,9 +281,11 @@ MemTableRep::Iterator* HashVectorRep::GetIterator(Arena* alloc_arena) {
   auto list = new MemtableSkipList(compare_, new_arena);
 
   for (size_t i = 0; i < bucket_size_; ++i) {
-    ReadLock l(&buckets_[i].rwlock);
-    for (const char* key : *buckets_[i].vec) {
-      list->Insert(key);
+    Bucket* bucket = GetBucket(i);
+    if (bucket != nullptr) {
+      for (const char* key : *bucket) {
+        list->Insert(key);
+      }
     }
   }
 
