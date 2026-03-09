@@ -222,11 +222,7 @@ bool HashVectorRep::Contains(const char* key) const {
   return it != bucket.vec->end() && compare_(*it, key) == 0;
 }
 
-size_t HashVectorRep::ApproximateMemoryUsage() {
-  // FIX 3: Lock-free fast memory estimation
-  return (num_entries_.load(std::memory_order_relaxed) * sizeof(const char*)) + 
-         (bucket_size_ * sizeof(Bucket));
-}
+size_t HashVectorRep::ApproximateMemoryUsage()  { return 0; }
 
 void HashVectorRep::Get(const LookupKey& k, void* callback_args,
                         bool (*callback_func)(void* arg, const char* entry)) {
