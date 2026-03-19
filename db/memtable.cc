@@ -182,7 +182,6 @@ size_t MemTable::ApproximateMemoryUsage() {
   for (size_t usage : usages) {
     // If usage + total_usage >= kMaxSizet, return kMaxSizet.
     // the following variation is to avoid numeric overflow.
-    printf("USAGE here is: %ld\n", usage);
     if (usage >= std::numeric_limits<size_t>::max() - total_usage) {
       return std::numeric_limits<size_t>::max();
     }

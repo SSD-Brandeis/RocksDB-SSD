@@ -286,17 +286,16 @@ void SortedVectorRep::Get(const LookupKey& k, void* callback_args,
                           bool (*callback_func)(void* arg, const char* entry)) {
   rwlock_.ReadLock();
   SortedVectorRep* vector_rep;
-  std::shared_ptr<Bucket> local_bucket; 
+  std::shared_ptr<Bucket> bucket; 
 
   if (immutable_) {
     vector_rep = this;
-    local_bucket = bucket_; 
   } else {
     vector_rep = nullptr;
-    local_bucket.reset(new Bucket(*bucket_));  // make a copy
+    bucket.reset(new Bucket(*bucket_));  // make a copy
   }
 
-  SortedVectorRep::Iterator iter(vector_rep, local_bucket, compare_);
+  SortedVectorRep::Iterator iter(vector_rep, immutable_ ? bucket_ : bucket, compare_);
   rwlock_.ReadUnlock();
 
   for (iter.Seek(k.user_key(), k.memtable_key().data());
