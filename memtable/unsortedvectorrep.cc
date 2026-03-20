@@ -33,7 +33,7 @@ class UnsortedVectorRep : public MemTableRep {
 
   void InsertConcurrently(KeyHandle handle) override;
 
-  // Returns true iff an entry that compares equal to key is in the collection.
+  // Returns true if an entry that compares equal to key is in the collection.
   bool Contains(const char* key) const override;
 
   void MarkReadOnly() override;
@@ -423,4 +423,4 @@ MemTableRep* UnsortedVectorRepFactory::CreateMemTableRep(
   return new UnsortedVectorRep(compare, allocator, count_);
 }
 
-}  // namespace ROCKSDB_NAMESPACE
+}  // namespace ROCKSDB_NAMESPACE    
