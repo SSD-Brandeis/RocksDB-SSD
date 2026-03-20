@@ -9,6 +9,7 @@
 #include <type_traits>
 
 #include "db/memtable.h"
+#include "db/dbformat.h" 
 #include "memory/arena.h"
 #include "memtable/stl_wrappers.h"
 #include "port/port.h"
@@ -53,6 +54,8 @@ class UnsortedVectorRep : public MemTableRep {
     const KeyComparator& compare_;
     std::string tmp_;  // For passing to EncodeKey
     bool mutable sorted_;
+    bool is_point_query_;    
+    Slice target_user_key_;  
     void DoSort() const;
 
    public:
@@ -198,9 +201,11 @@ UnsortedVectorRep::Iterator::Iterator(
       bucket_(bucket),
       cit_(bucket_->end()),
       compare_(compare),
-      sorted_(false) {}
+      sorted_(false),
+      is_point_query_(false) {}
 
 void UnsortedVectorRep::Iterator::DoSort() const {
+  if (is_point_query_) return; // Do not sort on pq
   // vrep is non-null means that we are working on an immutable memtable
   if (!sorted_ && vrep_ != nullptr) {
     WriteLock l(&vrep_->rwlock_);
@@ -231,13 +236,30 @@ bool UnsortedVectorRep::Iterator::Valid() const {
 // Returns the key at the current position.
 // REQUIRES: Valid()
 const char* UnsortedVectorRep::Iterator::key() const {
-  assert(sorted_);
+  assert(is_point_query_ || sorted_);
   return *cit_;
 }
 
 // Advances to the next greater key position.
 // REQUIRES: Valid()
 void UnsortedVectorRep::Iterator::Next() {
+  if (is_point_query_) {
+    if (cit_ == bucket_->end() || cit_ == bucket_->begin()) {
+      cit_ = bucket_->end();
+      return;
+    }
+    auto it = std::make_reverse_iterator(cit_);
+    for (; it != bucket_->rend(); ++it) {
+      Slice internal_key = GetLengthPrefixedSlice(*it);
+      if (ExtractUserKey(internal_key) == target_user_key_) {
+        cit_ = it.base() - 1;
+        return;
+      }
+    }
+    cit_ = bucket_->end();
+    return;
+  }
+  
   assert(sorted_);
   if (cit_ == bucket_->end()) {
     return;
@@ -248,7 +270,7 @@ void UnsortedVectorRep::Iterator::Next() {
 // Advances to the previous smaller key position.
 // REQUIRES: Valid()
 void UnsortedVectorRep::Iterator::Prev() {
-  assert(sorted_);
+  assert(sorted_ && !is_point_query_);
   if (cit_ == bucket_->begin()) {
     // If you try to go back from the first element, the iterator should be
     // invalidated. So we set it to past-the-end. This means that you can
@@ -262,6 +284,7 @@ void UnsortedVectorRep::Iterator::Prev() {
 // Advance to the first entry with a key >= target
 void UnsortedVectorRep::Iterator::Seek(const Slice& user_key,
                                        const char* memtable_key) {
+  is_point_query_ = false;
   DoSort();
   // Do binary search to find first value not less than the target
   const char* encoded_key =
@@ -278,12 +301,13 @@ void UnsortedVectorRep::Iterator::Seek(const Slice& user_key,
 // Unsorted vector performs O(N) scan to find the target key
 void UnsortedVectorRep::Iterator::SeekGet(const Slice& user_key,
                                           const char* memtable_key) {
-  const char* encoded_key =
-      (memtable_key != nullptr) ? memtable_key : EncodeKey(&tmp_, user_key);
+  is_point_query_ = true;
+  target_user_key_ = user_key;
 
-  // Start from the end and scan backward
+  // Start from the end and scan backward looking for exact user_key match
   for (auto it = bucket_->rbegin(); it != bucket_->rend(); ++it) {
-    if (compare_(*it, encoded_key) == 0) {
+    Slice internal_key = GetLengthPrefixedSlice(*it);
+    if (ExtractUserKey(internal_key) == target_user_key_) {
       cit_ = it.base() - 1;
       return;
     }
@@ -319,6 +343,7 @@ void UnsortedVectorRep::Iterator::SeekForPrev(const Slice& user_key,
 // Position at the first entry in collection.
 // Final state of iterator is Valid() iff collection is not empty.
 void UnsortedVectorRep::Iterator::SeekToFirst() {
+  is_point_query_ = false;
   DoSort();
   cit_ = bucket_->begin();
 }
@@ -326,6 +351,7 @@ void UnsortedVectorRep::Iterator::SeekToFirst() {
 // Position at the last entry in collection.
 // Final state of iterator is Valid() iff collection is not empty.
 void UnsortedVectorRep::Iterator::SeekToLast() {
+  is_point_query_ = false;
   DoSort();
   cit_ = bucket_->end();
   if (bucket_->size() != 0) {
