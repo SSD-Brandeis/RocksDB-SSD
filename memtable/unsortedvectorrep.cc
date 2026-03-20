@@ -205,7 +205,7 @@ UnsortedVectorRep::Iterator::Iterator(
       is_point_query_(false) {}
 
 void UnsortedVectorRep::Iterator::DoSort() const {
-  if (is_point_query_) return; // Do not sort on pq
+  if (is_point_query_) return; // Do not sort on pqs
   // vrep is non-null means that we are working on an immutable memtable
   if (!sorted_ && vrep_ != nullptr) {
     WriteLock l(&vrep_->rwlock_);

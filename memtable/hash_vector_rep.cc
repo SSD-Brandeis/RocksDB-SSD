@@ -49,8 +49,7 @@ class HashVectorRep : public MemTableRep {
 
   size_t bucket_size_;
   std::atomic<size_t> num_entries_{0};
-  
-  // New atomic trackers for exact $O(1)$ memory accounting
+
   std::atomic<size_t> num_initialized_buckets_{0};
   std::atomic<size_t> vector_capacity_bytes_{0};
 
@@ -85,7 +84,7 @@ class HashVectorRep : public MemTableRep {
       bucket = new (addr) Bucket();
       buckets_[hash].store(bucket, std::memory_order_release);
       
-      // track Tnew vector header (maybe 24 bytes) 
+      // header
       num_initialized_buckets_.fetch_add(1, std::memory_order_relaxed);
     }
     return bucket;
@@ -213,7 +212,7 @@ void HashVectorRep::Insert(KeyHandle handle) {
   auto transformed = GetPrefix(internal_key);
   Bucket* bucket = GetInitializedBucket(transformed);
 
-  // Capture capacity before insertion
+
   size_t old_capacity = bucket->capacity();
 
   const auto position = std::lower_bound(
@@ -221,7 +220,7 @@ void HashVectorRep::Insert(KeyHandle handle) {
       [this](const char* a, const char* b) { return compare_(a, b) < 0; });
   bucket->insert(position, key);
   
-  // Capture capacity after insertion and track if a reallocation occurred
+
   size_t new_capacity = bucket->capacity();
   if (new_capacity > old_capacity) {
     size_t capacity_diff = (new_capacity - old_capacity) * sizeof(const char*);
