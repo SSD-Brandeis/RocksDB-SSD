@@ -60,7 +60,6 @@ using KeyHandle = void*;
 Slice GetLengthPrefixedSlice(const char* data);
 
 class MemTableRep {
-
  public:
   // KeyComparator provides a means to compare keys, which are internal keys
   // concatenated with values.
@@ -471,15 +470,18 @@ MemTableRepFactory* NewHashLinkListRepFactory(
     bool if_log_bucket_dist_when_flash = true,
     uint32_t threshold_use_skiplist = 256);
 
-MemTableRepFactory* NewHashVectorRepFactory(size_t bucket_count = 50000);
+MemTableRepFactory* NewHashVectorRepFactory(
+    size_t bucket_count = 50000, bool if_log_bucket_dist_when_flash = true);
+
 class InPlaceUpdateSortedVectorRepFactory : public MemTableRepFactory {
   size_t count_;
 
  public:
   explicit InPlaceUpdateSortedVectorRepFactory(size_t count = 0);
 
- 
-  static const char* kClassName() { return "InPlaceUpdateSortedVectorRepFactory"; }
+  static const char* kClassName() {
+    return "InPlaceUpdateSortedVectorRepFactory";
+  }
   static const char* kNickName() { return "inplace_update_sorted_vector"; }
   const char* Name() const override { return kClassName(); }
   const char* NickName() const override { return kNickName(); }
