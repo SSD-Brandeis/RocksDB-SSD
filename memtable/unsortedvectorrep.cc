@@ -33,7 +33,7 @@ class UnsortedVectorRep : public MemTableRep {
 
   void InsertConcurrently(KeyHandle handle) override;
 
-  // Returns true if an entry that compares equal to key is in the collection.
+  // Returns true iff an entry that compares equal to key is in the collection.
   bool Contains(const char* key) const override;
 
   void MarkReadOnly() override;
@@ -205,7 +205,7 @@ UnsortedVectorRep::Iterator::Iterator(
       is_point_query_(false) {}
 
 void UnsortedVectorRep::Iterator::DoSort() const {
-  if (is_point_query_) return; // Do not sort on pqs
+  if (is_point_query_) return; // Do not sort on pq
   // vrep is non-null means that we are working on an immutable memtable
   if (!sorted_ && vrep_ != nullptr) {
     WriteLock l(&vrep_->rwlock_);
@@ -423,4 +423,4 @@ MemTableRep* UnsortedVectorRepFactory::CreateMemTableRep(
   return new UnsortedVectorRep(compare, allocator, count_);
 }
 
-}  // namespace ROCKSDB_NAMESPACE    
+}  // namespace ROCKSDB_NAMESPACE
