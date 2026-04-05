@@ -214,7 +214,16 @@ void HashVectorRep::Insert(KeyHandle handle) {
   num_entries_.fetch_add(1, std::memory_order_relaxed);
 }
 
-bool HashVectorRep::Contains(const char* key) const { return false; }
+bool HashVectorRep::Contains(const char* key) const {
+  Slice internal_key = GetLengthPrefixedSlice(key);
+  Bucket* bucket = GetBucket(GetPrefix(internal_key));
+
+  if (bucket == nullptr) {
+    return false;
+  }
+
+  return std::find(bucket->begin(), bucket->end(), key) != bucket->end();
+}
 
 size_t HashVectorRep::ApproximateMemoryUsage() {
   return initialized_buckets_.load(std::memory_order_relaxed) * sizeof(Bucket) +
@@ -231,10 +240,7 @@ void HashVectorRep::Get(const LookupKey& k, void* callback_args,
         bucket->begin(), bucket->end(), k.memtable_key().data(),
         [this](const char* a, const char* b) { return compare_(a, b) < 0; });
 
-    for (; it != bucket->end(); ++it) {
-      if (!callback_func(callback_args, *it)) {
-        break;
-      }
+    for (; it != bucket->end() && callback_func(callback_args, *it); ++it) {
     }
   }
 }
