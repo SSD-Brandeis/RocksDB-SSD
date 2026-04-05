@@ -115,6 +115,8 @@
 #include "util/string_util.h"
 #include "util/udt_util.h"
 #include "utilities/trace/replayer_impl.h"
+#include <chrono>
+#include <iostream>
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -2172,6 +2174,9 @@ Status DBImpl::GetImpl(const ReadOptions& read_options,
 Status DBImpl::Get(const ReadOptions& _read_options,
                    ColumnFamilyHandle* column_family, const Slice& key,
                    PinnableSlice* value, std::string* timestamp) {
+  #ifdef GET_TIMER
+      auto start = std::chrono::high_resolution_clock::now();
+#endif // GET_TIMER  
   assert(value != nullptr);
   value->Reset();
 
@@ -2188,18 +2193,31 @@ Status DBImpl::Get(const ReadOptions& _read_options,
   }
 
   Status s = GetImpl(read_options, column_family, key, value, timestamp);
+#ifdef GET_TIMER
+      auto stop = std::chrono::high_resolution_clock::now();
+      auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+      std::cout << "DBImpl::" << __FUNCTION__ << ": " << duration.count() << ", " << std::flush;
+#endif // GET_TIMER
   return s;
 }
 
 Status DBImpl::GetImpl(const ReadOptions& read_options,
                        ColumnFamilyHandle* column_family, const Slice& key,
                        PinnableSlice* value, std::string* timestamp) {
+#ifdef GET_TIMER
+      auto start = std::chrono::high_resolution_clock::now();
+#endif // GET_TIMER  
   GetImplOptions get_impl_options;
   get_impl_options.column_family = column_family;
   get_impl_options.value = value;
   get_impl_options.timestamp = timestamp;
 
   Status s = GetImpl(read_options, key, get_impl_options);
+#ifdef GET_TIMER
+      auto stop = std::chrono::high_resolution_clock::now();
+      auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+      std::cout << "MemTable::" << __FUNCTION__ << "Spent: " << duration.count() << ", " << std::flush;
+#endif // GET_TIMER
   return s;
 }
 

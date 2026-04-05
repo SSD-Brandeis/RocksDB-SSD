@@ -44,6 +44,9 @@
 #include "util/coding.h"
 #include "util/mutexlock.h"
 
+#include <chrono>
+#include <iostream>
+
 namespace ROCKSDB_NAMESPACE {
 
 ImmutableMemTableOptions::ImmutableMemTableOptions(
@@ -1410,6 +1413,10 @@ bool MemTable::Get(const LookupKey& key, std::string* value,
                    bool immutable_memtable, ReadCallback* callback,
                    bool* is_blob_index, bool do_merge) {
   // The sequence number is updated synchronously in version_set.h
+// #ifdef GET_TIMER
+//       auto start = std::chrono::high_resolution_clock::now();
+// #endif // GET_TIMER
+
   if (IsEmpty()) {
     // Avoiding recording stats for speed.
     return false;
@@ -1490,6 +1497,9 @@ void MemTable::GetFromTable(const LookupKey& key,
                             std::string* timestamp, Status* s,
                             MergeContext* merge_context, SequenceNumber* seq,
                             bool* found_final_value, bool* merge_in_progress) {
+  #ifdef GET_TIMER
+      auto start = std::chrono::high_resolution_clock::now();
+#endif // GET_TIMER
   Saver saver;
   saver.status = s;
   saver.found_final_value = found_final_value;
@@ -1528,6 +1538,11 @@ void MemTable::GetFromTable(const LookupKey& key,
   }
   assert(s->ok() || s->IsMergeInProgress() || *found_final_value);
   *seq = saver.seq;
+#ifdef GET_TIMER
+      auto stop = std::chrono::high_resolution_clock::now();
+      auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+      std::cout << "MemTable::" << __FUNCTION__ << ": " << duration.count() << ", " << std::flush;
+#endif // GET_TIMER
 }
 
 Status MemTable::ValidateKey(const char* key, bool allow_data_in_errors) {
