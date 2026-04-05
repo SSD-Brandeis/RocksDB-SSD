@@ -1,20 +1,23 @@
-//  Custom implementation from SSD-Lab
-//
-//  LinkListRep is a MemTableRep implementation that uses a linked list.
-//
+/*
+  Custom implementation from SSD-Lab
+    LinkListRep is a MemTableRep implementation that uses a sorted doubly-linked
+  list. Insert maintains sorted order.
+*/
+
 #include <assert.h>
 #include <stddef.h>
+
+#include <algorithm>
 #include <atomic>
 #include <memory>
 #include <vector>
-#include <algorithm>
 
 #include "db/memtable.h"
 #include "memory/arena.h"
+#include "port/port.h"
 #include "rocksdb/memtablerep.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/slice_transform.h"
-#include "port/port.h"
 #include "util/coding.h"
 #include "util/mutexlock.h"
 
@@ -22,369 +25,255 @@ namespace ROCKSDB_NAMESPACE {
 
 namespace {
 
-struct Node {
-  Node* next;
-  Node* prev;
-  char key_data[1];
+struct LinkListNode {
+  LinkListNode* Next() { return next_.load(std::memory_order_acquire); }
+  LinkListNode* Prev() { return prev_.load(std::memory_order_acquire); }
+  void SetNext(LinkListNode* x) { next_.store(x, std::memory_order_release); }
+  void SetPrev(LinkListNode* x) { prev_.store(x, std::memory_order_release); }
 
-  const char* Key() const { return key_data; }
-  char* MutableKey() { return key_data; }
+  LinkListNode() = default;
+
+ private:
+  std::atomic<LinkListNode*> next_{nullptr};
+  std::atomic<LinkListNode*> prev_{nullptr};
+
+  LinkListNode(const LinkListNode&) = delete;
+  LinkListNode& operator=(const LinkListNode&) = delete;
+
+ public:
+  char key[1];
 };
 
 class LinkListRep : public MemTableRep {
  public:
   explicit LinkListRep(const MemTableRep::KeyComparator& compare,
-                       Allocator* allocator, const SliceTransform* transform,
-                       Logger* logger);
+                       Allocator* allocator);
 
   KeyHandle Allocate(const size_t len, char** buf) override;
+
   void Insert(KeyHandle handle) override;
+
+  void InsertConcurrently(KeyHandle handle) override;
+
+  bool InsertKeyConcurrently(KeyHandle handle) override;
+
   bool Contains(const char* key) const override;
+
   size_t ApproximateMemoryUsage() override;
 
- 
   void Get(const LookupKey& k, void* callback_args,
            bool (*callback_func)(void* arg, const char* entry)) override;
 
-  ~LinkListRep() override;
+  ~LinkListRep() override = default;
 
-  // GetIterator:
-  // if immutable, no snapshot creation
-  // if mutable, create snapshot and measure snapshot creation time.
-  MemTableRep::Iterator* GetIterator(Arena* arena = nullptr) override;
-  MemTableRep::Iterator* GetDynamicPrefixIterator(Arena* arena = nullptr) override;
-
-  void MarkReadOnly() override;
+  MemTableRep::Iterator* GetIterator(Arena* arena) override;
 
   class Iterator : public MemTableRep::Iterator {
    public:
-    Iterator(LinkListRep* rep,
-             std::shared_ptr<std::vector<const char*>> snapshot,
-             const MemTableRep::KeyComparator& compare);
+    explicit Iterator(const LinkListRep* rep, LinkListNode* head,
+                      LinkListNode* tail)
+        : rep_(rep), head_(head), tail_(tail), node_(nullptr) {}
 
     ~Iterator() override = default;
 
-    bool Valid() const override;
-    const char* key() const override;
-    void Next() override;
-    void Prev() override;
+    bool Valid() const override { return node_ != nullptr; }
 
-  
-    void Seek(const Slice& internal_key, const char* memtable_key) override;
-    void SeekForPrev(const Slice& internal_key, const char* memtable_key) override;
-    void SeekToFirst() override;
-    void SeekToLast() override;
+    const char* key() const override {
+      assert(Valid());
+      return node_->key;
+    }
+
+    void Next() override {
+      assert(Valid());
+      node_ = node_->Next();
+    }
+
+    void Prev() override {
+      assert(Valid());
+      node_ = node_->Prev();
+    }
+
+    void Seek(const Slice& user_key, const char* memtable_key) override {
+      const char* encoded_key =
+          (memtable_key != nullptr) ? memtable_key : EncodeKey(&tmp_, user_key);
+
+      node_ = head_;
+      while (node_ != nullptr) {
+        if (rep_->compare_(node_->key, encoded_key) >= 0) {
+          return;
+        }
+        node_ = node_->Next();
+      }
+    }
+
+    void SeekForPrev(const Slice& user_key, const char* memtable_key) override {
+      const char* encoded_key =
+          (memtable_key != nullptr) ? memtable_key : EncodeKey(&tmp_, user_key);
+
+      node_ = head_;
+      LinkListNode* candidate = nullptr;
+      while (node_ != nullptr) {
+        int cmp = rep_->compare_(node_->key, encoded_key);
+        if (cmp == 0) {
+          return;
+        }
+        if (cmp > 0) {
+          break;
+        }
+        candidate = node_;
+        node_ = node_->Next();
+      }
+      node_ = candidate;
+    }
+
+    void SeekToFirst() override { node_ = head_; }
+
+    void SeekToLast() override { node_ = tail_; }
 
    private:
-    LinkListRep* rep_;
-    const MemTableRep::KeyComparator& compare_;
-    mutable bool sorted_;
+    const LinkListRep* rep_;
+    LinkListNode* head_;
+    LinkListNode* tail_;
+    LinkListNode* node_;
     std::string tmp_;
-    std::shared_ptr<std::vector<const char*>> snapshot_;
-    mutable size_t current_index_;
-
-    void DoSort() const;
-
-    inline const char* EncodeKey(std::string* tmp, const Slice& user_key) const {
-      tmp->clear();
-      PutLengthPrefixedSlice(tmp, user_key);
-      return tmp->data();
-    }
   };
 
  private:
-  Node* head_;
-  Node* tail_;
-
-  Allocator* const allocator_;
-  const MemTableRep::KeyComparator& compare_;
-  const SliceTransform* const transform_;
-  Logger* const logger_;
-
+  friend class Iterator;
+  std::atomic<LinkListNode*> head_;
+  std::atomic<LinkListNode*> tail_;
+  const KeyComparator& compare_;
   mutable port::RWMutex rwlock_;
-  bool immutable_;
-
-  std::vector<Node*> node_pointers_;
-
-  std::shared_ptr<std::vector<const char*>> entries_;
-  bool sorted_;
-
-  std::atomic<uint64_t> total_snapshot_creation_time_ns_{0};
-  std::atomic<uint64_t> total_sorting_time_ns_{0};
-
-  LinkListRep(const LinkListRep&) = delete;
-  LinkListRep& operator=(const LinkListRep&) = delete;
 };
 
 LinkListRep::LinkListRep(const MemTableRep::KeyComparator& compare,
-                         Allocator* allocator, const SliceTransform* transform,
-                         Logger* logger)
+                         Allocator* allocator)
     : MemTableRep(allocator),
       head_(nullptr),
       tail_(nullptr),
-      allocator_(allocator),
-      compare_(compare),
-      transform_(transform),
-      logger_(logger),
-      immutable_(false),
-      entries_(nullptr),
-      sorted_(false) {}
-
-LinkListRep::~LinkListRep() {
-
-}
+      compare_(compare) {}
 
 KeyHandle LinkListRep::Allocate(const size_t len, char** buf) {
-  size_t total_size = sizeof(Node) + len - 1;
-  char* mem = allocator_->AllocateAligned(total_size);
-  Node* node = reinterpret_cast<Node*>(mem);
-  node->next = nullptr;
-  node->prev = nullptr;
-  *buf = node->MutableKey();
-  return static_cast<void*>(node);
+  char* mem = allocator_->AllocateAligned(sizeof(LinkListNode) + len);
+  LinkListNode* x = new (mem) LinkListNode();
+  *buf = x->key;
+  return static_cast<void*>(x);
 }
 
 void LinkListRep::Insert(KeyHandle handle) {
-
   WriteLock l(&rwlock_);
-  assert(!immutable_);
+  LinkListNode* node = reinterpret_cast<LinkListNode*>(handle);
+  LinkListNode* curr_head = head_.load(std::memory_order_relaxed);
 
-  Node* node = reinterpret_cast<Node*>(handle);
-  if (tail_ == nullptr) {
-    head_ = node;
-    tail_ = node;
-  } else {
-    tail_->next = node;
-    node->prev = tail_;
-    tail_ = node;
+  // Empty list.
+  if (curr_head == nullptr) {
+    node->SetNext(nullptr);
+    node->SetPrev(nullptr);
+    head_.store(node, std::memory_order_release);
+    tail_.store(node, std::memory_order_release);
+    return;
   }
 
-  node_pointers_.push_back(node);
+  // Insert before head (new smallest key).
+  if (compare_(node->key, curr_head->key) < 0) {
+    node->SetNext(curr_head);
+    node->SetPrev(nullptr);
+    curr_head->SetPrev(node);
+    head_.store(node, std::memory_order_release);
+    return;
+  }
 
+  // Walk to insertion point: find last node whose key < node->key.
+  LinkListNode* curr = curr_head;
+  while (curr->Next() != nullptr &&
+         compare_(curr->Next()->key, node->key) < 0) {
+    curr = curr->Next();
+  }
 
+  LinkListNode* next_node = curr->Next();
+  node->SetNext(next_node);
+  node->SetPrev(curr);
+
+  if (next_node != nullptr) {
+    next_node->SetPrev(node);
+  } else {
+    tail_.store(node, std::memory_order_release);
+  }
+  curr->SetNext(node);
+}
+
+void LinkListRep::InsertConcurrently(KeyHandle handle) { Insert(handle); }
+
+bool LinkListRep::InsertKeyConcurrently(KeyHandle handle) {
+  InsertConcurrently(handle);
+  return true;
 }
 
 bool LinkListRep::Contains(const char* key) const {
   ReadLock l(&rwlock_);
-  Node* current = tail_;
+  Slice internal_key = GetLengthPrefixedSlice(key);
+  LinkListNode* current = head_.load(std::memory_order_relaxed);
   while (current != nullptr) {
-    if (compare_(current->Key(), key) == 0) {
+    int cmp = compare_(current->key, internal_key);
+    if (cmp == 0) {
       return true;
     }
-    current = current->prev;
+    if (cmp > 0) {
+      // Past the point where key could be — list is sorted.
+      break;
+    }
+    current = current->Next();
   }
   return false;
 }
 
-size_t LinkListRep::ApproximateMemoryUsage() {
-  return 0;
-}
+size_t LinkListRep::ApproximateMemoryUsage() { return 0; }
 
 void LinkListRep::Get(const LookupKey& k, void* callback_args,
                       bool (*callback_func)(void* arg, const char* entry)) {
+  ReadLock l(&rwlock_);
+  const char* encoded_key = k.memtable_key().data();
+  LinkListNode* curr = head_.load(std::memory_order_relaxed);
 
-
-  rwlock_.ReadLock();
-  LinkListRep* linklist_rep;
-  std::shared_ptr<std::vector<const char*>> snapshot;
-
-  if (immutable_) {
-   
-    linklist_rep = this;
-    snapshot = entries_;
-  } else {
-    linklist_rep = nullptr;
-
-    snapshot = std::make_shared<std::vector<const char*>>();
-    snapshot->resize(node_pointers_.size());
-    for (size_t i = 0; i < node_pointers_.size(); i++) {
-      (*snapshot)[i] = node_pointers_[i]->Key();
+  // Seek to first node >= encoded_key.
+  while (curr != nullptr) {
+    if (compare_(curr->key, encoded_key) >= 0) {
+      break;
     }
-
+    curr = curr->Next();
   }
 
-  Iterator iter(linklist_rep, snapshot, compare_);
-  rwlock_.ReadUnlock();
-
-  for (iter.Seek(k.user_key(), k.memtable_key().data());
-       iter.Valid() && callback_func(callback_args, iter.key());
-       iter.Next()) {
+  // Iterate forward, invoking the callback.
+  while (curr != nullptr) {
+    if (!callback_func(callback_args, curr->key)) {
+      break;
+    }
+    curr = curr->Next();
   }
-
-
 }
 
+// Snapshot head/tail so the iterator has a stable starting view.
+// The iterator itself does not hold any lock across calls
 MemTableRep::Iterator* LinkListRep::GetIterator(Arena* arena) {
-  char* mem = nullptr;
+  // Acquire read lock to get a consistent (head, tail) pair.
+  ReadLock l(&rwlock_);
+  LinkListNode* h = head_.load(std::memory_order_relaxed);
+  LinkListNode* t = tail_.load(std::memory_order_relaxed);
+
   if (arena != nullptr) {
-    mem = arena->AllocateAligned(sizeof(Iterator));
+    char* mem = arena->AllocateAligned(sizeof(Iterator));
+    return new (mem) Iterator(this, h, t);
   }
-
-  rwlock_.ReadLock();
-  LinkListRep* linklist_rep;
-  std::shared_ptr<std::vector<const char*>> snapshot;
-
-  if (immutable_) {
-    linklist_rep = this;
-    snapshot = entries_;
-  } else {
-    linklist_rep = nullptr;
-
-    snapshot = std::make_shared<std::vector<const char*>>();
-    snapshot->resize(node_pointers_.size());
-    for (size_t i = 0; i < node_pointers_.size(); i++) {
-      (*snapshot)[i] = node_pointers_[i]->Key();
-    }
-
-  }
-
-  Iterator* it;
-  if (arena == nullptr) {
-    it = new Iterator(linklist_rep, snapshot, compare_);
-  } else {
-    it = new (mem) Iterator(linklist_rep, snapshot, compare_);
-  }
-  rwlock_.ReadUnlock();
-  return it;
+  return new Iterator(this, h, t);
 }
-
-MemTableRep::Iterator* LinkListRep::GetDynamicPrefixIterator(Arena* arena) {
-  return GetIterator(arena);
-}
-
-void LinkListRep::MarkReadOnly() {
-  WriteLock l(&rwlock_);
-  immutable_ = true;
-
-
-  auto tmp = std::make_shared<std::vector<const char*>>();
-  tmp->resize(node_pointers_.size());
-  for (size_t i = 0; i < node_pointers_.size(); i++) {
-    (*tmp)[i] = node_pointers_[i]->Key();
-  }
-  entries_ = tmp;
-  sorted_ = false;
-}
-
-LinkListRep::Iterator::Iterator(LinkListRep* rep,
-                                std::shared_ptr<std::vector<const char*>> snapshot,
-                                const MemTableRep::KeyComparator& compare)
-    : rep_(rep),
-      compare_(compare),
-      sorted_(false),
-      snapshot_(std::move(snapshot)),
-      current_index_(0) {}
-
-bool LinkListRep::Iterator::Valid() const {
-  if (!sorted_) {
-    DoSort();
-  }
-  return current_index_ < snapshot_->size();
-}
-
-const char* LinkListRep::Iterator::key() const {
-  assert(Valid());
-  return (*snapshot_)[current_index_];
-}
-
-void LinkListRep::Iterator::Next() {
-  if (Valid()) {
-    current_index_++;
-  }
-}
-
-void LinkListRep::Iterator::Prev() {
-  if (!sorted_) {
-    DoSort();
-  }
-  if (current_index_ == 0) {
-    current_index_ = snapshot_->size();
-  } else {
-    current_index_--;
-  }
-}
-
-void LinkListRep::Iterator::Seek(const Slice& user_key, const char* memtable_key) {
-  if (!sorted_) {
-    DoSort();
-  }
-  const char* encoded_key =
-      (memtable_key != nullptr) ? memtable_key : EncodeKey(&tmp_, user_key);
-  auto it = std::lower_bound(snapshot_->begin(), snapshot_->end(), encoded_key,
-                             [this](const char* a, const char* b) {
-                               return compare_(a, b) < 0;
-                             });
-  current_index_ = static_cast<size_t>(it - snapshot_->begin());
-}
-
-void LinkListRep::Iterator::SeekForPrev(const Slice& user_key, const char* memtable_key) {
-  if (!sorted_) {
-    DoSort();
-  }
-  const char* encoded_key =
-      (memtable_key != nullptr) ? memtable_key : EncodeKey(&tmp_, user_key);
-  auto it = std::upper_bound(snapshot_->begin(), snapshot_->end(), encoded_key,
-                             [this](const char* key_ptr, const char* entry) {
-                               return compare_(key_ptr, entry) < 0;
-                             });
-  if (it == snapshot_->begin()) {
-    current_index_ = snapshot_->size();
-  } else {
-    current_index_ = static_cast<size_t>((it - snapshot_->begin()) - 1);
-  }
-}
-
-void LinkListRep::Iterator::SeekToFirst() {
-  if (!sorted_) {
-    DoSort();
-  }
-  current_index_ = 0;
-}
-
-void LinkListRep::Iterator::SeekToLast() {
-  if (!sorted_) {
-    DoSort();
-  }
-  if (snapshot_->empty()) {
-    current_index_ = snapshot_->size();
-  } else {
-    current_index_ = snapshot_->size() - 1;
-  }
-}
-
-void LinkListRep::Iterator::DoSort() const {
-  if (sorted_) return;
-
-
-  std::sort(snapshot_->begin(), snapshot_->end(),
-            [this](const char* a, const char* b) {
-              return compare_(a, b) < 0;
-            });
-
-
-  sorted_ = true;
-}
-
-class LinkListRepFactory : public MemTableRepFactory {
- public:
-  explicit LinkListRepFactory() {}
-
-  using MemTableRepFactory::CreateMemTableRep;
-
-  MemTableRep* CreateMemTableRep(const MemTableRep::KeyComparator& compare,
-                                 Allocator* allocator,
-                                 const SliceTransform* transform,
-                                 Logger* logger) override {
-    return new LinkListRep(compare, allocator, transform, logger);
-  }
-
-  const char* Name() const override { return "LinkListRepFactory"; }
-};
-
 }  // namespace
 
-MemTableRepFactory* NewLinkListRepFactory() {
-  return new LinkListRepFactory();
+LinkListRepFactory::LinkListRepFactory() {}
+
+MemTableRep* LinkListRepFactory::CreateMemTableRep(
+    const MemTableRep::KeyComparator& compare, Allocator* allocator,
+    const SliceTransform* /*transform*/, Logger* /*logger*/) {
+  return new LinkListRep(compare, allocator);
 }
 
 }  // namespace ROCKSDB_NAMESPACE

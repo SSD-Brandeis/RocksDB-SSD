@@ -540,6 +540,20 @@ class SortedVectorRepFactory : public MemTableRepFactory {
   bool IsInsertConcurrentlySupported() const override { return true; }
 };
 
-MemTableRepFactory* NewLinkListRepFactory();
+class LinkListRepFactory : public MemTableRepFactory {
+ public:
+  explicit LinkListRepFactory();
 
+  static const char* kClassName() { return "LinkListRepFactory"; }
+  static const char* kNickName() { return "linklist"; }
+  const char* Name() const override { return kClassName(); }
+  const char* NickName() const override { return kNickName(); }
+
+  using MemTableRepFactory::CreateMemTableRep;
+  MemTableRep* CreateMemTableRep(const MemTableRep::KeyComparator& compare,
+                                 Allocator* allocator,
+                                 const SliceTransform* transform,
+                                 Logger* logger) override;
+  bool IsInsertConcurrentlySupported() const override { return true; }
+};
 }  // namespace ROCKSDB_NAMESPACE
