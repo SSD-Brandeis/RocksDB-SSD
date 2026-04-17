@@ -542,7 +542,7 @@ class SortedVectorRepFactory : public MemTableRepFactory {
 
 class LinkListRepFactory : public MemTableRepFactory {
  public:
-  explicit LinkListRepFactory() {}
+  explicit LinkListRepFactory();
 
   static const char* kClassName() { return "LinkListRepFactory"; }
   static const char* kNickName() { return "linklist"; }
@@ -554,6 +554,6 @@ class LinkListRepFactory : public MemTableRepFactory {
                                  Allocator* allocator,
                                  const SliceTransform* transform,
                                  Logger* logger) override;
+  bool IsInsertConcurrentlySupported() const override { return true; }
 };
-
 }  // namespace ROCKSDB_NAMESPACE

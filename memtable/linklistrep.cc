@@ -1,13 +1,14 @@
-//  Custom implementation from SSD-Lab
-//
-//  LinkListRep is a MemTableRep implementation that uses a linked list.
-//
+/*
+  Custom implementation from SSD-Lab
+    LinkListRep is a MemTableRep implementation that uses a sorted doubly-linked
+  list. Insert maintains sorted order.
+*/
+
 #include <assert.h>
 #include <stddef.h>
 
 #include <algorithm>
 #include <atomic>
-#include <iostream>
 #include <memory>
 #include <vector>
 
@@ -25,52 +26,16 @@ namespace ROCKSDB_NAMESPACE {
 namespace {
 
 struct LinkListNode {
-  // Accessors/mutators for links. Wrapped in methods so we can
-  // add the appropriate barriers as necessary.
-  LinkListNode* Next() {
-    // Use an 'acquire load' so that we observe a fully initialized
-    // version of the returned Node.
-    return next_.load(std::memory_order_acquire);
-  }
-
-  LinkListNode* Prev() {
-    // Use an 'acquire load' so that we observe a fully initialized
-    // version of the returned Node.
-    return prev_.load(std::memory_order_acquire);
-  }
-
-  void SetNext(LinkListNode* x) {
-    // Use a 'release store' so that anybody who reads through this
-    // pointer observes a fully initialized version of the inserted node.
-    next_.store(x, std::memory_order_release);
-  }
-  void SetPrev(LinkListNode* x) {
-    // Use a 'release store' so that anybody who reads through this
-    // pointer observes a fully initialized version of the inserted node.
-    prev_.store(x, std::memory_order_release);
-  }
-
-  LinkListNode* NoBarrier_Next() {
-    return next_.load(std::memory_order_relaxed);
-  }
-
-  void NoBarrier_SetNext(LinkListNode* x) {
-    next_.store(x, std::memory_order_relaxed);
-  }
-
-  LinkListNode* NoBarrier_Prev() {
-    return prev_.load(std::memory_order_relaxed);
-  }
-
-  void NoBarrier_SetPrev(LinkListNode* x) {
-    prev_.store(x, std::memory_order_relaxed);
-  }
+  LinkListNode* Next() { return next_.load(std::memory_order_acquire); }
+  LinkListNode* Prev() { return prev_.load(std::memory_order_acquire); }
+  void SetNext(LinkListNode* x) { next_.store(x, std::memory_order_release); }
+  void SetPrev(LinkListNode* x) { prev_.store(x, std::memory_order_release); }
 
   LinkListNode() = default;
 
  private:
-  std::atomic<LinkListNode*> next_;
-  std::atomic<LinkListNode*> prev_;
+  std::atomic<LinkListNode*> next_{nullptr};
+  std::atomic<LinkListNode*> prev_{nullptr};
 
   LinkListNode(const LinkListNode&) = delete;
   LinkListNode& operator=(const LinkListNode&) = delete;
@@ -88,6 +53,10 @@ class LinkListRep : public MemTableRep {
 
   void Insert(KeyHandle handle) override;
 
+  void InsertConcurrently(KeyHandle handle) override;
+
+  bool InsertKeyConcurrently(KeyHandle handle) override;
+
   bool Contains(const char* key) const override;
 
   size_t ApproximateMemoryUsage() override;
@@ -95,49 +64,19 @@ class LinkListRep : public MemTableRep {
   void Get(const LookupKey& k, void* callback_args,
            bool (*callback_func)(void* arg, const char* entry)) override;
 
-  bool KeyIsAtNode(const LinkListNode* a, const LinkListNode* b) const {
-    // nullptr n is considered infinite
-    return (a != nullptr && b != nullptr) && (compare_(a->key, b->key) == 0);
-  }
-
-  bool KeyIsAtNode(const Slice& user_key, const LinkListNode* n) const {
-    return (n != nullptr) && (compare_(n->key, user_key) == 0);
-  }
-
-  LinkListNode* FindLatestOccuranceOfKey(LinkListNode* tail,
-                                         const Slice& user_key) const {
-    LinkListNode* x = tail;
-    while (x != nullptr) {
-      if (KeyIsAtNode(user_key, x)) {
-        return x;
-      }
-      x = x->Prev();
-    }
-    return x;
-  }
-
   ~LinkListRep() override = default;
 
   MemTableRep::Iterator* GetIterator(Arena* arena) override;
 
   class Iterator : public MemTableRep::Iterator {
    public:
-    explicit Iterator(LinkListRep* link_list_rep, LinkListNode* head,
-                      LinkListNode* tail, bool need_sorting = false)
-        : link_list_rep_(link_list_rep),
-          head_(head),
-          tail_(tail),
-          node_(nullptr),
-          need_sorting_(need_sorting),
-          sorted_(!need_sorting) {
-      if (need_sorting_ && !sorted_) {
-        MaybeSortLinkList();
-      }
-    }
+    explicit Iterator(const LinkListRep* rep, LinkListNode* head,
+                      LinkListNode* tail)
+        : rep_(rep), head_(head), tail_(tail), node_(nullptr) {}
 
     ~Iterator() override = default;
 
-    bool Valid() const override { return node_ != nullptr && sorted_; }
+    bool Valid() const override { return node_ != nullptr; }
 
     const char* key() const override {
       assert(Valid());
@@ -154,141 +93,57 @@ class LinkListRep : public MemTableRep {
       node_ = node_->Prev();
     }
 
-    // void Seek(const Slice& user_key, const char* memtable_key) override {
-    //   MaybeSortLinkList();
-    //   const char* encoded_key =
-    //       (memtable_key != nullptr) ? memtable_key : EncodeKey(&tmp_, user_key);
-    //   node_ = link_list_rep_->FindLatestOccuranceOfKey(tail_, encoded_key);
-    // }
-  void Seek(const Slice& user_key, const char* memtable_key) {
-    const char* encoded_key =
-        (memtable_key != nullptr) ? memtable_key : EncodeKey(&tmp_, user_key);
+    void Seek(const Slice& user_key, const char* memtable_key) override {
+      const char* encoded_key =
+          (memtable_key != nullptr) ? memtable_key : EncodeKey(&tmp_, user_key);
 
-    LinkListNode* curr = head_; 
-    while (curr != nullptr) {
-      // Identical comparison to VectorRep's equal_range
-      if (link_list_rep_->compare_(curr->key, encoded_key) >= 0) {
-        break;
+      node_ = head_;
+      while (node_ != nullptr) {
+        if (rep_->compare_(node_->key, encoded_key) >= 0) {
+          return;
+        }
+        node_ = node_->Next();
       }
-      curr = curr->Next();
     }
-    node_ = curr;
-  }
 
     void SeekForPrev(const Slice& user_key, const char* memtable_key) override {
-    }
+      const char* encoded_key =
+          (memtable_key != nullptr) ? memtable_key : EncodeKey(&tmp_, user_key);
 
-    void SeekToFirst() override {
-      MaybeSortLinkList();
       node_ = head_;
+      LinkListNode* candidate = nullptr;
+      while (node_ != nullptr) {
+        int cmp = rep_->compare_(node_->key, encoded_key);
+        if (cmp == 0) {
+          return;
+        }
+        if (cmp > 0) {
+          break;
+        }
+        candidate = node_;
+        node_ = node_->Next();
+      }
+      node_ = candidate;
     }
 
-    void SeekToLast() override {
-      MaybeSortLinkList();
-      node_ = tail_;
-    }
+    void SeekToFirst() override { node_ = head_; }
+
+    void SeekToLast() override { node_ = tail_; }
 
    private:
-    LinkListRep* link_list_rep_;
+    const LinkListRep* rep_;
     LinkListNode* head_;
     LinkListNode* tail_;
     LinkListNode* node_;
-    bool need_sorting_;
-    bool sorted_;
     std::string tmp_;
-
-    static LinkListNode* MergeSortedLists(
-        LinkListNode* a, LinkListNode* b,
-        const MemTableRep::KeyComparator& compare) {
-      if (!a) return b;
-      if (!b) return a;
-
-      LinkListNode* head = nullptr;
-
-      // Initialize head
-      if (compare(a->key, b->key) < 0) {
-        head = a;
-        a = a->NoBarrier_Next();
-      } else {
-        head = b;
-        b = b->NoBarrier_Next();
-      }
-
-      LinkListNode* curr = head;
-
-      while (a && b) {
-        if (compare(a->key, b->key) < 0) {
-          curr->NoBarrier_SetNext(a);
-          a->NoBarrier_SetPrev(curr);
-          curr = a;
-          a = a->NoBarrier_Next();
-        } else {
-          curr->NoBarrier_SetNext(b);
-          b->NoBarrier_SetPrev(curr);
-          curr = b;
-          b = b->NoBarrier_Next();
-        }
-      }
-
-      LinkListNode* remainder = a ? a : b;
-      while (remainder) {
-        curr->NoBarrier_SetNext(remainder);
-        remainder->NoBarrier_SetPrev(curr);
-        curr = remainder;
-        remainder = remainder->NoBarrier_Next();
-      }
-
-      head->NoBarrier_SetPrev(nullptr);
-      return head;
-    }
-
-    static LinkListNode* SplitList(LinkListNode* head) {
-      LinkListNode* slow = head;
-      LinkListNode* fast = head;
-
-      while (fast->NoBarrier_Next() &&
-             fast->NoBarrier_Next()->NoBarrier_Next()) {
-        slow = slow->NoBarrier_Next();
-        fast = fast->NoBarrier_Next()->NoBarrier_Next();
-      }
-
-      LinkListNode* second = slow->NoBarrier_Next();
-      slow->NoBarrier_SetNext(nullptr);
-      if (second) second->NoBarrier_SetPrev(nullptr);
-
-      return second;
-    }
-
-    LinkListNode* MergeSort(LinkListNode* head,
-                            const MemTableRep::KeyComparator& compare) {
-      if (!head || !head->NoBarrier_Next()) return head;
-
-      LinkListNode* second = SplitList(head);
-
-      LinkListNode* left = MergeSort(head, compare);
-      LinkListNode* right = MergeSort(second, compare);
-
-      return MergeSortedLists(left, right, compare);
-    }
-
-    void MaybeSortLinkList() {
-      if (!sorted_ && need_sorting_) {
-        head_ = MergeSort(head_, link_list_rep_->compare_);
-
-        tail_ = head_;
-        while (tail_ && tail_->NoBarrier_Next()) {
-          tail_ = tail_->NoBarrier_Next();
-        }
-
-        sorted_ = true;
-      }
-    }
   };
 
  private:
+  friend class Iterator;
   std::atomic<LinkListNode*> head_;
   std::atomic<LinkListNode*> tail_;
   const KeyComparator& compare_;
+  mutable port::RWMutex rwlock_;
 };
 
 LinkListRep::LinkListRep(const MemTableRep::KeyComparator& compare,
@@ -301,32 +156,34 @@ LinkListRep::LinkListRep(const MemTableRep::KeyComparator& compare,
 KeyHandle LinkListRep::Allocate(const size_t len, char** buf) {
   char* mem = allocator_->AllocateAligned(sizeof(LinkListNode) + len);
   LinkListNode* x = new (mem) LinkListNode();
-  x->NoBarrier_SetNext(nullptr);
-  x->NoBarrier_SetPrev(nullptr);
   *buf = x->key;
   return static_cast<void*>(x);
 }
 
 void LinkListRep::Insert(KeyHandle handle) {
+  WriteLock l(&rwlock_);
   LinkListNode* node = reinterpret_cast<LinkListNode*>(handle);
   LinkListNode* curr_head = head_.load(std::memory_order_relaxed);
 
+  // Empty list.
   if (curr_head == nullptr) {
-    node->NoBarrier_SetNext(nullptr);
-    node->NoBarrier_SetPrev(nullptr);
+    node->SetNext(nullptr);
+    node->SetPrev(nullptr);
     head_.store(node, std::memory_order_release);
     tail_.store(node, std::memory_order_release);
     return;
   }
 
+  // Insert before head (new smallest key).
   if (compare_(node->key, curr_head->key) < 0) {
-    node->NoBarrier_SetNext(curr_head);
-    node->NoBarrier_SetPrev(nullptr);
+    node->SetNext(curr_head);
+    node->SetPrev(nullptr);
     curr_head->SetPrev(node);
     head_.store(node, std::memory_order_release);
     return;
   }
 
+  // Walk to insertion point: find last node whose key < node->key.
   LinkListNode* curr = curr_head;
   while (curr->Next() != nullptr &&
          compare_(curr->Next()->key, node->key) < 0) {
@@ -334,8 +191,8 @@ void LinkListRep::Insert(KeyHandle handle) {
   }
 
   LinkListNode* next_node = curr->Next();
-  node->NoBarrier_SetNext(next_node);
-  node->NoBarrier_SetPrev(curr);
+  node->SetNext(next_node);
+  node->SetPrev(curr);
 
   if (next_node != nullptr) {
     next_node->SetPrev(node);
@@ -345,46 +202,27 @@ void LinkListRep::Insert(KeyHandle handle) {
   curr->SetNext(node);
 }
 
-// void LinkListRep::Insert(KeyHandle handle) {
-//   LinkListNode* node = reinterpret_cast<LinkListNode*>(handle);
-//   LinkListNode* old_tail = tail_.load(std::memory_order_relaxed);
+void LinkListRep::InsertConcurrently(KeyHandle handle) { Insert(handle); }
 
-//   if (old_tail == nullptr) {
-//     node->NoBarrier_SetNext(nullptr);
-//     node->NoBarrier_SetPrev(nullptr);
-//     head_.store(node, std::memory_order_release);
-//     tail_.store(node, std::memory_order_release);
-//   } else {
-//     node->NoBarrier_SetPrev(old_tail);
-//     node->NoBarrier_SetNext(nullptr);
-//     old_tail->SetNext(node);
-//     tail_.store(node, std::memory_order_release);
-//   }
-// }
-
-// bool LinkListRep::Contains(const char* key) const {
-//   Slice internal_key = GetLengthPrefixedSlice(key);
-//   LinkListNode* current = tail_.load(std::memory_order_acquire);
-//   while (current != nullptr) {
-//     if (compare_(current->key, internal_key) == 0) {
-//       return true;
-//     }
-//     current = current->Prev();
-//   }
-//   return false;
-// }
+bool LinkListRep::InsertKeyConcurrently(KeyHandle handle) {
+  InsertConcurrently(handle);
+  return true;
+}
 
 bool LinkListRep::Contains(const char* key) const {
+  ReadLock l(&rwlock_);
   Slice internal_key = GetLengthPrefixedSlice(key);
-  LinkListNode* current = tail_.load(std::memory_order_acquire);
+  LinkListNode* current = head_.load(std::memory_order_relaxed);
   while (current != nullptr) {
-    // DEBUG: Print both keys to see if they actually match visually
-    std::cout << "Comparing: " << Slice(current->key).data() << " with "
-              << internal_key.data() << std::endl;
-    if (compare_(current->key, internal_key) == 0) {
+    int cmp = compare_(current->key, internal_key);
+    if (cmp == 0) {
       return true;
     }
-    current = current->Prev();
+    if (cmp > 0) {
+      // Past the point where key could be — list is sorted.
+      break;
+    }
+    current = current->Next();
   }
   return false;
 }
@@ -393,33 +231,44 @@ size_t LinkListRep::ApproximateMemoryUsage() { return 0; }
 
 void LinkListRep::Get(const LookupKey& k, void* callback_args,
                       bool (*callback_func)(void* arg, const char* entry)) {
-  std::cout << "Contains Check: " << Contains(k.memtable_key().data())
-            << std::endl
-            << std::flush;
-  if (head_ != nullptr) {
-    Iterator iter(this, head_, tail_);
+  ReadLock l(&rwlock_);
+  const char* encoded_key = k.memtable_key().data();
+  LinkListNode* curr = head_.load(std::memory_order_relaxed);
 
-    for (iter.Seek(k.user_key(), k.memtable_key().data());
-         iter.Valid() && callback_func(callback_args, iter.key());
-         iter.Next()) {
+  // Seek to first node >= encoded_key.
+  while (curr != nullptr) {
+    if (compare_(curr->key, encoded_key) >= 0) {
+      break;
     }
+    curr = curr->Next();
+  }
+
+  // Iterate forward, invoking the callback.
+  while (curr != nullptr) {
+    if (!callback_func(callback_args, curr->key)) {
+      break;
+    }
+    curr = curr->Next();
   }
 }
 
+// Snapshot head/tail so the iterator has a stable starting view.
+// The iterator itself does not hold any lock across calls
 MemTableRep::Iterator* LinkListRep::GetIterator(Arena* arena) {
-  std::cout << "CREATING AN ITERATOR HERE" << std::endl << std::flush;
-  char* mem = nullptr;
-  if (arena != nullptr) {
-    mem = arena->AllocateAligned(sizeof(Iterator));
-  }
+  // Acquire read lock to get a consistent (head, tail) pair.
+  ReadLock l(&rwlock_);
+  LinkListNode* h = head_.load(std::memory_order_relaxed);
+  LinkListNode* t = tail_.load(std::memory_order_relaxed);
 
-  if (arena == nullptr) {
-    return new Iterator(this, head_, tail_, true);
-  } else {
-    return new (mem) Iterator(this, head_, tail_, true);
+  if (arena != nullptr) {
+    char* mem = arena->AllocateAligned(sizeof(Iterator));
+    return new (mem) Iterator(this, h, t);
   }
+  return new Iterator(this, h, t);
 }
 }  // namespace
+
+LinkListRepFactory::LinkListRepFactory() {}
 
 MemTableRep* LinkListRepFactory::CreateMemTableRep(
     const MemTableRep::KeyComparator& compare, Allocator* allocator,

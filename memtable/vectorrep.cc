@@ -4,6 +4,8 @@
 //  (found in the LICENSE.Apache file in the root directory).
 //
 #include <algorithm>
+// #include <chrono>
+// #include <cstdio>
 #include <memory>
 #include <set>
 #include <type_traits>
@@ -319,7 +321,12 @@ void VectorRep::Get(const LookupKey& k, void* callback_args,
     vector_rep = this;
   } else {
     vector_rep = nullptr;
+    // auto snap_start = std::chrono::high_resolution_clock::now();
     bucket.reset(new Bucket(*bucket_));  // make a copy
+    auto snap_end = std::chrono::high_resolution_clock::now();
+    // fprintf(stdout, "snapshot_ns: %ld\n",
+    //         std::chrono::duration_cast<std::chrono::nanoseconds>(
+    //             snap_end - snap_start).count());
   }
   VectorRep::Iterator iter(vector_rep, immutable_ ? bucket_ : bucket, compare_);
   rwlock_.ReadUnlock();
