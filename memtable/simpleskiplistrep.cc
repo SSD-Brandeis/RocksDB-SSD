@@ -24,12 +24,17 @@ class SimpleSkipList {
 
   struct Node {
     const char* key;
-    Node* next[kMaxHeight];
+    int height;
+    Node* next[1];  // flexible trailing array — actual size determined at allocation
 
-    explicit Node(const char* k) : key(k) {
-      for (int i = 0; i < kMaxHeight; ++i) {
-        next[i] = nullptr;
-      }
+    static Node* Create(const char* k, int h, Allocator* alloc) {
+      size_t sz = sizeof(Node) + (h - 1) * sizeof(Node*);
+      char* mem = alloc->AllocateAligned(sz);
+      Node* n = new (mem) Node();
+      n->key = k;
+      n->height = h;
+      for (int i = 0; i < h; ++i) n->next[i] = nullptr;
+      return n;
     }
   };
 
@@ -37,8 +42,7 @@ class SimpleSkipList {
                  Allocator* allocator)
       : compare_(compare), allocator_(allocator), max_height_(1) {
     //  Allocate head node directly from RocksDB's Arena
-    char* mem = allocator_->AllocateAligned(sizeof(Node));
-    head_ = new (mem) Node(nullptr);
+    head_ = Node::Create(nullptr, kMaxHeight, allocator_);
 
     unsigned int seed = static_cast<unsigned int>(
         std::chrono::system_clock::now().time_since_epoch().count());
@@ -76,9 +80,7 @@ class SimpleSkipList {
       max_height_ = height;
     }
 
-    // FIX 3: Allocate new inserted nodes directly from the Arena
-    char* mem = allocator_->AllocateAligned(sizeof(Node));
-    Node* new_node = new (mem) Node(key);
+    Node* new_node = Node::Create(key, height, allocator_);
 
     for (int i = 0; i < height; i++) {
       new_node->next[i] = update[i]->next[i];

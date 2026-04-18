@@ -323,7 +323,7 @@ void VectorRep::Get(const LookupKey& k, void* callback_args,
     vector_rep = nullptr;
     // auto snap_start = std::chrono::high_resolution_clock::now();
     bucket.reset(new Bucket(*bucket_));  // make a copy
-    auto snap_end = std::chrono::high_resolution_clock::now();
+    // auto snap_end = std::chrono::high_resolution_clock::now();
     // fprintf(stdout, "snapshot_ns: %ld\n",
     //         std::chrono::duration_cast<std::chrono::nanoseconds>(
     //             snap_end - snap_start).count());
