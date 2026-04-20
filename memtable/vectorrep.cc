@@ -15,6 +15,7 @@
 #include "port/port.h"
 #include "rocksdb/memtablerep.h"
 #include "rocksdb/utilities/options_type.h"
+#include "util/get_latency_tracker.h"
 #include "util/mutexlock.h"
 
 namespace ROCKSDB_NAMESPACE {
@@ -312,21 +313,36 @@ void VectorRep::Iterator::SeekToLast() {
 
 void VectorRep::Get(const LookupKey& k, void* callback_args,
                     bool (*callback_func)(void* arg, const char* entry)) {
-  rwlock_.ReadLock();
+  GET_LATENCY_BEGIN(t_get);
+
   VectorRep* vector_rep;
   std::shared_ptr<Bucket> bucket;
+
+  GET_LATENCY_BEGIN(t_lock);
+  rwlock_.ReadLock();
+  GET_LATENCY_END(t_lock, vectorrep_lock_ns);
+
   if (immutable_) {
     vector_rep = this;
   } else {
     vector_rep = nullptr;
+    GET_LATENCY_BEGIN(t_copy);
     bucket.reset(new Bucket(*bucket_));  // make a copy
+    GET_LATENCY_END(t_copy, vectorrep_bucket_copy_ns);
   }
   VectorRep::Iterator iter(vector_rep, immutable_ ? bucket_ : bucket, compare_);
   rwlock_.ReadUnlock();
 
-  for (iter.Seek(k.user_key(), k.memtable_key().data());
-       iter.Valid() && callback_func(callback_args, iter.key()); iter.Next()) {
+  GET_LATENCY_BEGIN(t_seek);
+  iter.Seek(k.user_key(), k.memtable_key().data());
+  GET_LATENCY_END(t_seek, vectorrep_seek_ns);
+
+  GET_LATENCY_BEGIN(t_cb);
+  for (; iter.Valid() && callback_func(callback_args, iter.key()); iter.Next()) {
   }
+  GET_LATENCY_END(t_cb, vectorrep_callback_ns);
+
+  GET_LATENCY_END(t_get, vectorrep_get_ns);
 }
 
 MemTableRep::Iterator* VectorRep::GetIterator(Arena* arena) {

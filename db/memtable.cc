@@ -42,6 +42,7 @@
 #include "table/merging_iterator.h"
 #include "util/autovector.h"
 #include "util/coding.h"
+#include "util/get_latency_tracker.h"
 #include "util/mutexlock.h"
 
 namespace ROCKSDB_NAMESPACE {
@@ -1415,6 +1416,7 @@ bool MemTable::Get(const LookupKey& key, std::string* value,
     return false;
   }
 
+  GET_LATENCY_BEGIN(t_memtable_get);
   PERF_TIMER_GUARD(get_from_memtable_time);
 
   std::unique_ptr<FragmentedRangeTombstoneIterator> range_del_iter(
@@ -1443,6 +1445,7 @@ bool MemTable::Get(const LookupKey& key, std::string* value,
   if (bloom_filter_) {
     // when both memtable_whole_key_filtering and prefix_extractor_ are set,
     // only do whole key filtering for Get() to save CPU
+    GET_LATENCY_BEGIN(t_bloom);
     if (moptions_.memtable_whole_key_filtering) {
       may_contain = bloom_filter_->MayContain(user_key_without_ts);
       bloom_checked = true;
@@ -1454,6 +1457,7 @@ bool MemTable::Get(const LookupKey& key, std::string* value,
         bloom_checked = true;
       }
     }
+    GET_LATENCY_END(t_bloom, memtable_bloom_ns);
   }
 
   if (bloom_filter_ && !may_contain) {
@@ -1464,9 +1468,11 @@ bool MemTable::Get(const LookupKey& key, std::string* value,
     if (bloom_checked) {
       PERF_COUNTER_ADD(bloom_memtable_hit_count, 1);
     }
+    GET_LATENCY_BEGIN(t_gft);
     GetFromTable(key, *max_covering_tombstone_seq, do_merge, callback,
                  is_blob_index, value, columns, timestamp, s, merge_context,
                  seq, &found_final_value, &merge_in_progress);
+    GET_LATENCY_END(t_gft, memtable_get_from_table_ns);
   }
 
   // No change to value, since we have not yet found a Put/Delete
@@ -1479,6 +1485,7 @@ bool MemTable::Get(const LookupKey& key, std::string* value,
     }
   }
   PERF_COUNTER_ADD(get_from_memtable_count, 1);
+  GET_LATENCY_END(t_memtable_get, memtable_get_ns);
   return found_final_value;
 }
 

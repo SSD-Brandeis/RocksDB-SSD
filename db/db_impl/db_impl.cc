@@ -110,6 +110,7 @@
 #include "util/defer.h"
 #include "util/distributed_mutex.h"
 #include "util/hash_containers.h"
+#include "util/get_latency_tracker.h"
 #include "util/mutexlock.h"
 #include "util/stop_watch.h"
 #include "util/string_util.h"
@@ -2330,6 +2331,8 @@ bool DBImpl::ShouldReferenceSuperVersion(const MergeContext& merge_context) {
 
 Status DBImpl::GetImpl(const ReadOptions& read_options, const Slice& key,
                        GetImplOptions& get_impl_options) {
+  GET_LATENCY_GUARD(dbimpl_getimpl_ns);
+
   assert(get_impl_options.value != nullptr ||
          get_impl_options.merge_operands != nullptr ||
          get_impl_options.columns != nullptr);
