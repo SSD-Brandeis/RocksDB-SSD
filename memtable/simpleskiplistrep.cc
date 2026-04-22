@@ -273,24 +273,12 @@ class SimpleSkipListRep : public MemTableRep {
 };
 }  // namespace
 
-class SimpleSkipListFactory : public MemTableRepFactory {
- public:
-  SimpleSkipListFactory() {}
+SimpleSkipListFactory::SimpleSkipListFactory() {}
 
-  using MemTableRepFactory::CreateMemTableRep;
-
-  MemTableRep* CreateMemTableRep(const MemTableRep::KeyComparator& compare,
-                                 Allocator* allocator,
-                                 const SliceTransform* /*transform*/,
-                                 Logger* /*logger*/) override {
-    return new SimpleSkipListRep(compare, allocator);
-  }
-
-  const char* Name() const override { return "SimpleSkipListRepFactory"; }
-};
-
-MemTableRepFactory* NewSimpleSkipListRepFactory() {
-  return new SimpleSkipListFactory();
+MemTableRep* SimpleSkipListFactory::CreateMemTableRep(
+    const MemTableRep::KeyComparator& compare, Allocator* allocator,
+    const SliceTransform* /*transform*/, Logger* /*logger*/) {
+  return new SimpleSkipListRep(compare, allocator);
 }
 
 }  // namespace ROCKSDB_NAMESPACE

@@ -812,6 +812,7 @@ set(SOURCES
         memtable/hash_vector_rep.cc
         memtable/skiplistrep.cc
         memtable/simpleskiplistrep.cc
+        memtable/dynamic_memtable_factory.cc
         memtable/vectorrep.cc
         # memtable/inplace_update_sortedvectorrep.cc
         memtable/sortedvectorrep.cc

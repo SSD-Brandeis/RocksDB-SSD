@@ -404,6 +404,21 @@ class SkipListFactory : public MemTableRepFactory {
   size_t lookahead_;
 };
 
+class SimpleSkipListFactory : public MemTableRepFactory {
+ public:
+  explicit SimpleSkipListFactory();
+  
+  static const char* kClassName() { return "SimpleSkipListFactory"; }
+  static const char* kNickName() { return "simple_skip_list"; }
+  const char* Name() const override { return kClassName(); }
+
+  using MemTableRepFactory::CreateMemTableRep;
+  MemTableRep* CreateMemTableRep(const MemTableRep::KeyComparator& compare,
+                                 Allocator* allocator,
+                                 const SliceTransform* /*transform*/,
+                                 Logger* /*logger*/) override;
+};
+
 // This creates MemTableReps that are backed by an std::vector. On iteration,
 // the vector is sorted. This is useful for workloads where iteration is very
 // rare and writes are generally not issued after reads begin.
@@ -556,4 +571,49 @@ class LinkListRepFactory : public MemTableRepFactory {
                                  Logger* logger) override;
   bool IsInsertConcurrentlySupported() const override { return true; }
 };
+
+// ---------------------------------------------------------------------------
+// DynamicMemtableFactory
+// ---------------------------------------------------------------------------
+
+// Abstract interface for cost-model-based memtable type selection.
+// Applications implement this (e.g. by tracking operation mix) and pass a
+// pointer to NewDynamicMemTableFactory so the factory can consult it on
+// every CreateMemTableRep() call without being coupled to application code.
+class MemtableAdvisor {
+ public:
+  virtual ~MemtableAdvisor() {}
+
+  // Returns the preferred memtable type id in [1, 9], matching the
+  // memtable_factory enum used in db_env.h:
+  //   1 = SkipList          5 = UnsortedVector
+  //   2 = VectorRep         6 = SortedVector
+  //   3 = HashSkipList      7 = LinkList
+  //   4 = HashLinkList      8 = SimpleSkipList
+  //                         9 = HashVector
+  //
+  // has_prefix: true when a SliceTransform (prefix extractor) is active.
+  virtual int SelectMemtableType(bool has_prefix) const = 0;
+};
+
+// Configuration passed to NewDynamicMemTableFactory; mirrors the relevant
+// sub-factory knobs from DBEnv.
+struct DynamicMemtableConfig {
+  size_t   vector_prealloc        = 0;
+  size_t   bucket_count           = 50000;
+  int32_t  skiplist_height        = 4;
+  int32_t  skiplist_branch        = 4;
+  size_t   huge_page_tlb_size     = 0;
+  int      linklist_log_threshold = 4096;
+  bool     linklist_log_dist      = true;
+  uint32_t linklist_use_skiplist  = 256;
+};
+
+// Creates a MemTableRepFactory that delegates to one of the nine built-in
+// factory implementations chosen by the advisor on every CreateMemTableRep()
+// call.  The advisor is NOT owned by the returned factory and must outlive it.
+MemTableRepFactory* NewDynamicMemTableFactory(
+    MemtableAdvisor* advisor,
+    const DynamicMemtableConfig& cfg = {});
+
 }  // namespace ROCKSDB_NAMESPACE
