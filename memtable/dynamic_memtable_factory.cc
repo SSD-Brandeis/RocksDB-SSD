@@ -5,9 +5,10 @@
 // factory implementations the advisor recommends for the current workload.
 
 #include <atomic>
-#include <iostream>
 #include <memory>
 
+#include "logging/logging.h"
+#include "rocksdb/env.h"
 #include "rocksdb/memtablerep.h"
 #include "rocksdb/slice_transform.h"
 
@@ -64,8 +65,9 @@ class DynamicMemtableFactory : public MemTableRepFactory {
     const int type = advisor_->SelectMemtableType(has_prefix);
     last_type_.store(type, std::memory_order_relaxed);
 
-    std::cout << "[DynamicMemtableFactory] selected " << TypeName(type)
-              << (has_prefix ? " (prefix extractor active)" : "") << "\n";
+    ROCKS_LOG_INFO(logger, "[DynamicMemtableFactory] selected %s%s",
+                   TypeName(type),
+                   has_prefix ? " (prefix extractor active)" : "");
 
     auto sub = MakeSubFactory(type, has_prefix);
     return sub->CreateMemTableRep(cmp, allocator, transform, logger);
