@@ -666,6 +666,8 @@ if(USE_FOLLY)
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--copy-dt-needed-entries")
 endif()
 find_package(Threads REQUIRED)
+find_package(TBB REQUIRED)
+list(APPEND THIRDPARTY_LIBS TBB::tbb)
 
 # Main library source code
 
@@ -811,6 +813,13 @@ set(SOURCES
         memtable/hash_skiplist_rep.cc
         memtable/hash_vector_rep.cc
         memtable/skiplistrep.cc
+        memtable/art_rep.cc
+        memtable/ARTSynchronized/ART/Tree.cpp
+        memtable/ARTSynchronized/ART/N.cpp
+        memtable/ARTSynchronized/OptimisticLockCoupling/Tree.cpp
+        memtable/ARTSynchronized/Epoche.cpp
+        memtable/tlx_btree_rep.cc
+        memtable/tlx/die/core.cpp
         memtable/simpleskiplistrep.cc
         memtable/dynamic_memtable_factory.cc
         memtable/vectorrep.cc
@@ -1705,3 +1714,11 @@ option(WITH_BENCHMARK "build benchmark tests" OFF)
 if(WITH_BENCHMARK)
   add_subdirectory(${PROJECT_SOURCE_DIR}/microbench/)
 endif()
+
+set_source_files_properties(
+    memtable/ARTSynchronized/ART/Tree.cpp
+    memtable/ARTSynchronized/ART/N.cpp
+    memtable/ARTSynchronized/OptimisticLockCoupling/Tree.cpp
+    memtable/ARTSynchronized/Epoche.cpp
+    PROPERTIES COMPILE_FLAGS "-Wno-shadow -Wno-maybe-uninitialized -Wno-error=shadow -Wno-error=maybe-uninitialized -Wno-error"
+)

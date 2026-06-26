@@ -142,6 +142,13 @@ LIB_SOURCES =                                                   \
   memtable/hash_linklist_rep.cc                                 \
   memtable/hash_skiplist_rep.cc                                 \
   memtable/skiplistrep.cc                                       \
+  memtable/art_rep.cc                                           \
+  memtable/ARTSynchronized/ART/Tree.cpp                         \
+  memtable/ARTSynchronized/ART/N.cpp                            \
+  memtable/ARTSynchronized/OptimisticLockCoupling/Tree.cpp      \
+  memtable/ARTSynchronized/Epoche.cpp                           \
+  memtable/tlx_btree_rep.cc                                     \
+  memtable/tlx/die/core.cpp                                     \
   memtable/vectorrep.cc                                         \
   memtable/wbwi_memtable.cc                                     \
   memtable/write_buffer_manager.cc                              \
