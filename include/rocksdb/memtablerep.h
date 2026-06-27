@@ -555,6 +555,24 @@ class SortedVectorRepFactory : public MemTableRepFactory {
   bool IsInsertConcurrentlySupported() const override { return true; }
 };
 
+class StatefulVectorRepFactory : public MemTableRepFactory {
+  size_t count_;
+
+ public:
+  explicit StatefulVectorRepFactory(size_t count = 0);
+
+  static const char* kClassName() { return "StatefulVectorRepFactory"; }
+  static const char* kNickName() { return "stateful_vector"; }
+  const char* Name() const override { return kClassName(); }
+  const char* NickName() const override { return kNickName(); }
+
+  using MemTableRepFactory::CreateMemTableRep;
+  MemTableRep* CreateMemTableRep(const MemTableRep::KeyComparator&, Allocator*,
+                                 const SliceTransform*,
+                                 Logger* logger) override;
+  bool IsInsertConcurrentlySupported() const override { return true; }
+};
+
 class LinkListRepFactory : public MemTableRepFactory {
  public:
   explicit LinkListRepFactory();

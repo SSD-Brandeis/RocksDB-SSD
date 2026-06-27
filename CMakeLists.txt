@@ -814,6 +814,7 @@ set(SOURCES
         memtable/simpleskiplistrep.cc
         memtable/dynamic_memtable_factory.cc
         memtable/vectorrep.cc
+        memtable/statefulvector.cc
         # memtable/inplace_update_sortedvectorrep.cc
         memtable/sortedvectorrep.cc
         memtable/unsortedvectorrep.cc
