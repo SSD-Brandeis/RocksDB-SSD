@@ -17,6 +17,7 @@
 #include "rocksdb/memtablerep.h"
 #include "rocksdb/utilities/options_type.h"
 #include "util/mutexlock.h"
+#include "memtable/wp_rwmutex.h"
 
 namespace ROCKSDB_NAMESPACE {
 namespace {
@@ -108,7 +109,7 @@ class SortedVectorRep : public MemTableRep {
   ALIGN_AS(CACHE_LINE_SIZE) RelaxedAtomic<size_t> bucket_size_;
   using Bucket = std::vector<const char*>;
   std::shared_ptr<Bucket> bucket_;
-  mutable port::RWMutex rwlock_;
+  mutable WPRWMutex rwlock_;
   bool immutable_;
   const KeyComparator& compare_;
   // Thread-local vector to buffer concurrent writes.
@@ -124,7 +125,7 @@ class SortedVectorRep : public MemTableRep {
 void SortedVectorRep::Insert(KeyHandle handle) {
   auto* key = static_cast<char*>(handle);
   {
-    WriteLock l(&rwlock_);
+    WPWriteLock l(&rwlock_);
     assert(!immutable_);
     const auto position = std::lower_bound(
         bucket_->begin(), bucket_->end(), key,
@@ -149,7 +150,7 @@ void SortedVectorRep::InsertConcurrently(KeyHandle handle) {
 }
 
 bool SortedVectorRep::Contains(const char* key) const {
-  ReadLock l(&rwlock_);
+  WPReadLock l(&rwlock_);
   auto it = std::lower_bound(
       bucket_->begin(), bucket_->end(), key,
       [this](const char* a, const char* b) { return compare_(a, b) < 0; });
@@ -157,7 +158,7 @@ bool SortedVectorRep::Contains(const char* key) const {
 }
 
 void SortedVectorRep::MarkReadOnly() {
-  WriteLock l(&rwlock_);
+  WPWriteLock l(&rwlock_);
   immutable_ = true;
 }
 
@@ -169,21 +170,23 @@ size_t SortedVectorRep::ApproximateMemoryUsage() {
 void SortedVectorRep::BatchPostProcess() {
   auto* v = static_cast<TlBucket*>(tl_writes_.Get());
   if (v) {
-    WriteLock l(&rwlock_);
-    assert(!immutable_);
-    std::vector<const char*> merged;
-    merged.reserve(bucket_->size() + v->size());
+    {
+      WPWriteLock l(&rwlock_);
+      assert(!immutable_);
+      std::vector<const char*> merged;
+      merged.reserve(bucket_->size() + v->size());
 
-    std::merge(
-        bucket_->begin(), bucket_->end(), v->begin(), v->end(),
-        std::back_inserter(merged),
-        [this](const char* a, const char* b) { return compare_(a, b) < 0; });
+      std::merge(
+          bucket_->begin(), bucket_->end(), v->begin(), v->end(),
+          std::back_inserter(merged),
+          [this](const char* a, const char* b) { return compare_(a, b) < 0; });
 
-    bucket_->swap(merged);
+      bucket_->swap(merged);
+    }
+    bucket_size_.FetchAddRelaxed(v->size());
+    delete v;
+    tl_writes_.Reset(nullptr);
   }
-  bucket_size_.FetchAddRelaxed(v->size());
-  delete v;
-  tl_writes_.Reset(nullptr);
 }
 
 SortedVectorRep::SortedVectorRep(const KeyComparator& compare,
@@ -251,7 +254,7 @@ Status SortedVectorRep::Iterator::SeekAndValidate(
     const std::function<Status(const char*, bool)>&
     /* key_validation_callback */) {
   if (vrep_) {
-    WriteLock l(&vrep_->rwlock_);
+    WPWriteLock l(&vrep_->rwlock_);
     if (bucket_->begin() == bucket_->end()) {
       // Memtable is empty
       return Status::OK();
@@ -309,7 +312,7 @@ MemTableRep::Iterator* SortedVectorRep::GetIterator(Arena* arena) {
   if (arena != nullptr) {
     mem = arena->AllocateAligned(sizeof(Iterator));
   }
-  ReadLock l(&rwlock_);
+  WPReadLock l(&rwlock_);
   if (immutable_) {
     if (arena == nullptr) {
       return new Iterator(this, bucket_, compare_);

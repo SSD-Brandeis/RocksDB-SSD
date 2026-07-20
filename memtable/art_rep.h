@@ -23,6 +23,10 @@ class ARTRepFactory : public MemTableRepFactory {
       const SliceTransform* transform, Logger* logger) override;
 
   virtual const char* Name() const override { return "ARTRepFactory"; }
+
+  // The underlying ART uses optimistic lock coupling; insert/lookup/range
+  // scans are safe under full read/write concurrency.
+  virtual bool IsInsertConcurrentlySupported() const override { return true; }
 };
 
 class ARTRep : public MemTableRep {

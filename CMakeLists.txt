@@ -422,6 +422,15 @@ if(WITH_TBB)
   list(APPEND THIRDPARTY_LIBS TBB::TBB)
 endif()
 
+# Synchronized ART memtable (memtable/art_rep.cc) links against the
+# ARTSynchronized library instead of compiling its sources inline.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../ARTSynchronized
+                  ${CMAKE_CURRENT_BINARY_DIR}/ARTSynchronized
+                  EXCLUDE_FROM_ALL)
+target_include_directories(ARTSynchronized INTERFACE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../ARTSynchronized/..>)
+list(APPEND THIRDPARTY_LIBS ARTSynchronized)
+
 # Stall notifications eat some performance from inserts
 option(DISABLE_STALL_NOTIF "Build with stall notifications" OFF)
 if(DISABLE_STALL_NOTIF)
@@ -814,10 +823,6 @@ set(SOURCES
         memtable/hash_vector_rep.cc
         memtable/skiplistrep.cc
         memtable/art_rep.cc
-        memtable/ARTSynchronized/ART/Tree.cpp
-        memtable/ARTSynchronized/ART/N.cpp
-        memtable/ARTSynchronized/OptimisticLockCoupling/Tree.cpp
-        memtable/ARTSynchronized/Epoche.cpp
         memtable/tlx_btree_rep.cc
         memtable/tlx/die/core.cpp
         memtable/simpleskiplistrep.cc
@@ -1303,6 +1308,14 @@ if(NOT WIN32 OR ROCKSDB_INSTALL_ON_WINDOWS)
 
   install(
     TARGETS ${ROCKSDB_STATIC_LIB}
+    EXPORT RocksDBTargets
+    COMPONENT devel
+    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  )
+
+  install(
+    TARGETS ARTSynchronized
     EXPORT RocksDBTargets
     COMPONENT devel
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"

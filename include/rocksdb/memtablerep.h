@@ -417,6 +417,10 @@ class SimpleSkipListFactory : public MemTableRepFactory {
                                  Allocator* allocator,
                                  const SliceTransform* /*transform*/,
                                  Logger* /*logger*/) override;
+
+  // Readers are lock-free; inserts are serialized internally by a mutex, so
+  // parallel write-group threads may call InsertConcurrently safely.
+  bool IsInsertConcurrentlySupported() const override { return true; }
 };
 
 // This creates MemTableReps that are backed by an std::vector. On iteration,

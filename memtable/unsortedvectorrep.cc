@@ -6,6 +6,7 @@
 //
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <type_traits>
 
 #include "db/memtable.h"
@@ -16,6 +17,7 @@
 #include "rocksdb/memtablerep.h"
 #include "rocksdb/utilities/options_type.h"
 #include "util/mutexlock.h"
+#include "memtable/wp_rwmutex.h"
 
 namespace ROCKSDB_NAMESPACE {
 namespace {
@@ -54,8 +56,14 @@ class UnsortedVectorRep : public MemTableRep {
     const KeyComparator& compare_;
     std::string tmp_;  // For passing to EncodeKey
     bool mutable sorted_;
-    bool is_point_query_;    
-    Slice target_user_key_;  
+    bool is_point_query_;
+    Slice target_user_key_;
+    // Point-query mode: all entries whose user key matches the target,
+    // ordered by the internal key comparator (newest version first). This is
+    // independent of bucket append order, which is not sequence-ordered when
+    // concurrent writers merge their thread-local buffers.
+    std::vector<const char*> pq_matches_;
+    size_t pq_idx_ = 0;
     void DoSort() const;
 
    public:
@@ -116,7 +124,7 @@ class UnsortedVectorRep : public MemTableRep {
   ALIGN_AS(CACHE_LINE_SIZE) RelaxedAtomic<size_t> bucket_size_;
   using Bucket = std::vector<const char*>;
   std::shared_ptr<Bucket> bucket_;
-  mutable port::RWMutex rwlock_;
+  mutable WPRWMutex rwlock_;
   bool immutable_;
   bool sorted_;
   const KeyComparator& compare_;
@@ -133,7 +141,7 @@ class UnsortedVectorRep : public MemTableRep {
 void UnsortedVectorRep::Insert(KeyHandle handle) {
   auto* key = static_cast<char*>(handle);
   {
-    WriteLock l(&rwlock_);
+    WPWriteLock l(&rwlock_);
     assert(!immutable_);
     bucket_->push_back(key);
   }
@@ -151,12 +159,12 @@ void UnsortedVectorRep::InsertConcurrently(KeyHandle handle) {
 
 // Returns true iff an entry that compares equal to key is in the collection.
 bool UnsortedVectorRep::Contains(const char* key) const {
-  ReadLock l(&rwlock_);
+  WPReadLock l(&rwlock_);
   return std::find(bucket_->begin(), bucket_->end(), key) != bucket_->end();
 }
 
 void UnsortedVectorRep::MarkReadOnly() {
-  WriteLock l(&rwlock_);
+  WPWriteLock l(&rwlock_);
   immutable_ = true;
 }
 
@@ -169,7 +177,7 @@ void UnsortedVectorRep::BatchPostProcess() {
   auto* v = static_cast<TlBucket*>(tl_writes_.Get());
   if (v) {
     {
-      WriteLock l(&rwlock_);
+      WPWriteLock l(&rwlock_);
       assert(!immutable_);
       for (auto& key : *v) {
         bucket_->push_back(key);
@@ -208,7 +216,7 @@ void UnsortedVectorRep::Iterator::DoSort() const {
   if (is_point_query_) return; // Do not sort on pq
   // vrep is non-null means that we are working on an immutable memtable
   if (!sorted_ && vrep_ != nullptr) {
-    WriteLock l(&vrep_->rwlock_);
+    WPWriteLock l(&vrep_->rwlock_);
     if (!vrep_->sorted_) {
       std::sort(bucket_->begin(), bucket_->end(),
                 stl_wrappers::Compare(compare_));
@@ -229,6 +237,9 @@ void UnsortedVectorRep::Iterator::DoSort() const {
 
 // Returns true iff the iterator is positioned at a valid node.
 bool UnsortedVectorRep::Iterator::Valid() const {
+  if (is_point_query_) {
+    return pq_idx_ < pq_matches_.size();
+  }
   DoSort();
   return cit_ != bucket_->end();
 }
@@ -237,6 +248,9 @@ bool UnsortedVectorRep::Iterator::Valid() const {
 // REQUIRES: Valid()
 const char* UnsortedVectorRep::Iterator::key() const {
   assert(is_point_query_ || sorted_);
+  if (is_point_query_) {
+    return pq_matches_[pq_idx_];
+  }
   return *cit_;
 }
 
@@ -244,22 +258,10 @@ const char* UnsortedVectorRep::Iterator::key() const {
 // REQUIRES: Valid()
 void UnsortedVectorRep::Iterator::Next() {
   if (is_point_query_) {
-    if (cit_ == bucket_->end() || cit_ == bucket_->begin()) {
-      cit_ = bucket_->end();
-      return;
-    }
-    auto it = std::make_reverse_iterator(cit_);
-    for (; it != bucket_->rend(); ++it) {
-      Slice internal_key = GetLengthPrefixedSlice(*it);
-      if (ExtractUserKey(internal_key) == target_user_key_) {
-        cit_ = it.base() - 1;
-        return;
-      }
-    }
-    cit_ = bucket_->end();
+    ++pq_idx_;
     return;
   }
-  
+
   assert(sorted_);
   if (cit_ == bucket_->end()) {
     return;
@@ -296,24 +298,39 @@ void UnsortedVectorRep::Iterator::Seek(const Slice& user_key,
              .first;
 }
 
-// Advance to the first entry with a key >= target
+// Position at the newest entry matching the target user key.
 //
-// Unsorted vector performs O(N) scan to find the target key
+// Unsorted vector performs an O(N) scan collecting every version of the
+// target key, then orders the matches by the internal key comparator so the
+// callback sees versions newest-first regardless of bucket append order.
 void UnsortedVectorRep::Iterator::SeekGet(const Slice& user_key,
                                           const char* memtable_key) {
   is_point_query_ = true;
   target_user_key_ = user_key;
+  pq_matches_.clear();
+  pq_idx_ = 0;
 
-  // Start from the end and scan backward looking for exact user_key match
-  for (auto it = bucket_->rbegin(); it != bucket_->rend(); ++it) {
-    Slice internal_key = GetLengthPrefixedSlice(*it);
-    if (ExtractUserKey(internal_key) == target_user_key_) {
-      cit_ = it.base() - 1;
-      return;
+  {
+    // On an immutable memtable this iterator shares the live bucket, which a
+    // concurrent range iterator's DoSort() may still be sorting in place;
+    // exclude against that one-time sort. (vrep_ == nullptr means we own a
+    // private snapshot copy and no lock is needed.)
+    std::optional<WPReadLock> l;
+    if (vrep_ != nullptr) {
+      l.emplace(&vrep_->rwlock_);
+    }
+    for (auto it = bucket_->begin(); it != bucket_->end(); ++it) {
+      Slice internal_key = GetLengthPrefixedSlice(*it);
+      if (ExtractUserKey(internal_key) == target_user_key_) {
+        pq_matches_.push_back(*it);
+      }
     }
   }
 
-  cit_ = bucket_->end();
+  // Same user key throughout, so this orders purely by (seq, type)
+  // descending — i.e. newest version first.
+  std::sort(pq_matches_.begin(), pq_matches_.end(),
+            [this](const char* a, const char* b) { return compare_(a, b) < 0; });
 }
 
 Status UnsortedVectorRep::Iterator::SeekAndValidate(
@@ -322,7 +339,7 @@ Status UnsortedVectorRep::Iterator::SeekAndValidate(
     const std::function<Status(const char*, bool)>&
     /* key_validation_callback */) {
   if (vrep_) {
-    WriteLock l(&vrep_->rwlock_);
+    WPWriteLock l(&vrep_->rwlock_);
     if (bucket_->begin() == bucket_->end()) {
       // Memtable is empty
       return Status::OK();
@@ -385,7 +402,7 @@ MemTableRep::Iterator* UnsortedVectorRep::GetIterator(Arena* arena) {
   if (arena != nullptr) {
     mem = arena->AllocateAligned(sizeof(Iterator));
   }
-  ReadLock l(&rwlock_);
+  WPReadLock l(&rwlock_);
   if (immutable_) {
     if (arena == nullptr) {
       return new Iterator(this, bucket_, compare_);

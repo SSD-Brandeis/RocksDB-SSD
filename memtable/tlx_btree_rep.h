@@ -22,6 +22,10 @@ class TLXBTreeRepFactory : public MemTableRepFactory {
       const SliceTransform* transform, Logger* logger) override;
 
   virtual const char* Name() const override { return "TLXBTreeRepFactory"; }
+
+  // Inserts are serialized internally by a reader-writer lock, so parallel
+  // write-group threads may call InsertConcurrently safely.
+  virtual bool IsInsertConcurrentlySupported() const override { return true; }
 };
 
 }  // namespace rocksdb
