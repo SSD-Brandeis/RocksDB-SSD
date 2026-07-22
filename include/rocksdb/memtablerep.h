@@ -418,8 +418,6 @@ class SimpleSkipListFactory : public MemTableRepFactory {
                                  const SliceTransform* /*transform*/,
                                  Logger* /*logger*/) override;
 
-  // Readers are lock-free; inserts are serialized internally by a mutex, so
-  // parallel write-group threads may call InsertConcurrently safely.
   bool IsInsertConcurrentlySupported() const override { return true; }
 };
 
