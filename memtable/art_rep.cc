@@ -1,16 +1,6 @@
 // art_rep.cc
 //
-// MemTableRep backed by an Adaptive Radix Tree with Optimistic Lock Coupling
-// (ART_OLC). The tree itself provides full read/write concurrency: writers
-// take per-node locks and bump version counters; readers validate versions
-// and restart on conflict. Entries (TIDs) are pointers to arena-backed
-// memtable keys, so handed-out entries stay valid for the memtable lifetime;
-// only interior nodes are reclaimed, via the tree's epoch mechanism.
-//
-// ThreadInfo objects are created on the stack per operation. They must not be
-// cached across operations or threads: a ThreadInfo references the calling
-// thread's epoch slot, and destroying a cached one from another thread would
-// un-pin an epoch that thread is still relying on.
+
 #pragma GCC diagnostic ignored "-Wshadow"
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #include "memtable/art_rep.h"
@@ -100,9 +90,7 @@ void ARTRep::Get(const LookupKey& k, void* callback_args,
   EncodeARTKey(k.memtable_key().data(), cur_key);
   bool inclusive = true;
 
-  // lookupRange returns at most kBatch entries per call; keep refetching from
-  // the last delivered entry so long runs (e.g. many versions of one user
-  // key) are not truncated.
+
   while (true) {
     TID results[kBatch];
     std::size_t resultsFound = 0;
@@ -147,10 +135,7 @@ class ARTIterator : public MemTableRep::Iterator {
     return reinterpret_cast<const char*>(buffer_[buffer_idx_]);
   }
 
-  // Buffered entries form a consistent snapshot of the tree at fetch time.
-  // An entry inserted concurrently inside the buffered window was published
-  // after the reader's sequence number and would be skipped by the caller's
-  // sequence check anyway, so serving Next/Prev from the buffer is correct.
+
   virtual void Next() override {
     assert(valid_);
     if (!reverse_) {
@@ -210,8 +195,7 @@ class ARTIterator : public MemTableRep::Iterator {
   }
 
   virtual void SeekToLast() override {
-    // Upper-bound sentinel: no practical internal key (user key + 8-byte
-    // suffix) exceeds kMaxSentinelLen bytes of 0xff.
+
     Key max_key;
     max_key.setKeyLen(kMaxSentinelLen);
     memset(&max_key[0], 0xff, kMaxSentinelLen);
@@ -257,7 +241,6 @@ class ARTIterator : public MemTableRep::Iterator {
 
     TID temp_buffer[kBufSize];
     std::size_t found = 0;
-    // Fresh per-operation ThreadInfo on this thread's stack; see file header.
     auto threadInfo = const_cast<ART_OLC::Tree*>(tree_)->getThreadInfo();
     if (backward) {
       tree_->lookupRangeReverse(start_key, temp_buffer, kBufSize, found,
@@ -282,8 +265,7 @@ class ARTIterator : public MemTableRep::Iterator {
 
   const ART_OLC::Tree* tree_;
   bool valid_;
-  // Direction of the current buffer: false = ascending (forward), true =
-  // descending (reverse).
+
   bool reverse_;
   size_t buffer_idx_;
   size_t buffer_len_;

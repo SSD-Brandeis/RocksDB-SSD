@@ -1,22 +1,8 @@
 //  Custom implementation from SSD-Lab
 //
-//  SimpleSkipListRep is a MemTableRep implementation that uses a simple skip
-//  list (classic design, without the inline-key and splice optimizations of
-//  RocksDB's InlineSkipList).
+//  SimpleSkipListRep is a MemTableRep implementation that uses a simple skip list.
 //
-//  Concurrency control (lock-free for both sides):
-//   - Readers (Contains/Get/iterators) are lock-free. Next pointers are
-//     std::atomic<Node*>; writers publish a node with release stores/CAS and
-//     readers observe them with acquire loads, so a reader either sees the
-//     fully-initialized node or does not see it at all. Nodes are never
-//     deleted while the memtable is alive (arena-backed), so no reclamation
-//     protocol is needed.
-//   - Writers use per-level compare-and-swap insertion (the standard
-//     concurrent skip-list insert, as in RocksDB's InlineSkipList): compute
-//     the splice, link each level bottom-up with CAS, and re-search a level
-//     on CAS failure. Because keys are unique and nothing is removed, the
-//     structure is ABA-free and insert throughput scales with the number of
-//     write threads.
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>

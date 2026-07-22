@@ -1,18 +1,6 @@
 // tlx_btree_rep.cc
 //
-// MemTableRep backed by a tlx B+-tree (tlx::btree_set).
-//
-// Concurrency control: the tlx B+-tree has no internal thread safety, so the
-// rep serializes all structural access through a reader-writer lock.
-//  - Insert/InsertConcurrently take the write lock (writers are mutually
-//    excluded; this also makes RocksDB's parallel write-group path safe).
-//  - Contains/Get take the read lock, so lookups from multiple threads
-//    proceed concurrently and are correctly excluded against writers.
-//  - Iterators never retain a live tlx iterator across calls: a tree insert
-//    can split nodes and invalidate iterators, so each iterator operation
-//    re-positions by the current key under the read lock (O(log n) per step)
-//    and stores only the arena-backed key pointer, which is stable for the
-//    lifetime of the memtable.
+
 #include "memtable/tlx_btree_rep.h"
 
 #ifndef ROCKSDB_LITE
