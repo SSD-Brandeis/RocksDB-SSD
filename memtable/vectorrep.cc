@@ -58,7 +58,8 @@ class VectorRep : public MemTableRep {
    public:
     explicit Iterator(class VectorRep* vrep,
                       std::shared_ptr<std::vector<const char*>> bucket,
-                      const KeyComparator& compare);
+                      const KeyComparator& compare,
+                      bool sorted = false);
 
     // Initialize an iterator over the specified collection.
     // The returned iterator is not valid.
@@ -110,6 +111,13 @@ class VectorRep : public MemTableRep {
   ALIGN_AS(CACHE_LINE_SIZE) RelaxedAtomic<size_t> bucket_size_;
   using Bucket = std::vector<const char*>;
   std::shared_ptr<Bucket> bucket_;
+  // A cached, already-sorted copy of bucket_, reused across Get() calls that
+  // aren't separated by an Insert()/BatchPostProcess() -- invalidated (reset
+  // to null) by both, rebuilt lazily by the next Get() that needs it. Turns
+  // "resort on every single Get()" into "resort only after a write" for
+  // read-heavy or batched-write bursts; a Get() immediately following an
+  // Insert() still pays the full copy+sort, same as before.
+  std::shared_ptr<Bucket> bucket_snapshot_;
   mutable port::RWMutex rwlock_;
   bool immutable_;
   bool sorted_;
@@ -130,6 +138,7 @@ void VectorRep::Insert(KeyHandle handle) {
     WriteLock l(&rwlock_);
     assert(!immutable_);
     bucket_->push_back(key);
+    bucket_snapshot_.reset();
   }
   bucket_size_.FetchAddRelaxed(1);
 }
@@ -168,6 +177,7 @@ void VectorRep::BatchPostProcess() {
       for (auto& key : *v) {
         bucket_->push_back(key);
       }
+      bucket_snapshot_.reset();
     }
     bucket_size_.FetchAddRelaxed(v->size());
     delete v;
@@ -180,6 +190,7 @@ VectorRep::VectorRep(const KeyComparator& compare, Allocator* allocator,
     : MemTableRep(allocator),
       bucket_size_(0),
       bucket_(new Bucket()),
+      bucket_snapshot_(nullptr),
       immutable_(false),
       sorted_(false),
       compare_(compare),
@@ -189,12 +200,13 @@ VectorRep::VectorRep(const KeyComparator& compare, Allocator* allocator,
 
 VectorRep::Iterator::Iterator(class VectorRep* vrep,
                               std::shared_ptr<std::vector<const char*>> bucket,
-                              const KeyComparator& compare)
+                              const KeyComparator& compare,
+                              bool sorted)
     : vrep_(vrep),
       bucket_(bucket),
       cit_(bucket_->end()),
       compare_(compare),
-      sorted_(false) {}
+      sorted_(sorted) {}
 
 void VectorRep::Iterator::DoSort() const {
   // vrep is non-null means that we are working on an immutable memtable
@@ -312,20 +324,43 @@ void VectorRep::Iterator::SeekToLast() {
 
 void VectorRep::Get(const LookupKey& k, void* callback_args,
                     bool (*callback_func)(void* arg, const char* entry)) {
-  rwlock_.ReadLock();
   VectorRep* vector_rep;
   std::shared_ptr<Bucket> bucket;
+  bool is_sorted = false;
+
+  rwlock_.ReadLock();
   if (immutable_) {
     vector_rep = this;
+    bucket = bucket_;
+    VectorRep::Iterator iter(vector_rep, bucket, compare_, false);
+    rwlock_.ReadUnlock();
+
+    for (iter.Seek(k.user_key(), k.memtable_key().data());
+         iter.Valid() && callback_func(callback_args, iter.key()); iter.Next()) {
+    }
   } else {
     vector_rep = nullptr;
-    bucket.reset(new Bucket(*bucket_));  // make a copy
-  }
-  VectorRep::Iterator iter(vector_rep, immutable_ ? bucket_ : bucket, compare_);
-  rwlock_.ReadUnlock();
+    if (bucket_snapshot_) {
+      bucket = bucket_snapshot_;
+      is_sorted = true;
+      rwlock_.ReadUnlock();
+    } else {
+      rwlock_.ReadUnlock();
+      rwlock_.WriteLock();
+      if (!bucket_snapshot_) {
+        bucket_snapshot_.reset(new Bucket(*bucket_));
+        std::sort(bucket_snapshot_->begin(), bucket_snapshot_->end(),
+                  stl_wrappers::Compare(compare_));
+      }
+      bucket = bucket_snapshot_;
+      is_sorted = true;
+      rwlock_.WriteUnlock();
+    }
 
-  for (iter.Seek(k.user_key(), k.memtable_key().data());
-       iter.Valid() && callback_func(callback_args, iter.key()); iter.Next()) {
+    VectorRep::Iterator iter(vector_rep, bucket, compare_, is_sorted);
+    for (iter.Seek(k.user_key(), k.memtable_key().data());
+         iter.Valid() && callback_func(callback_args, iter.key()); iter.Next()) {
+    }
   }
 }
 
