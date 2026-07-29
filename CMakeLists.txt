@@ -422,24 +422,14 @@ if(WITH_TBB)
   list(APPEND THIRDPARTY_LIBS TBB::TBB)
 endif()
 
-# Synchronized ART memtable (memtable/art_rep.cc) links against the
-# ARTSynchronized library instead of compiling its sources inline.
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../ARTSynchronized
+# Synchronized ART memtable (memtable/art_rep.cc)
+add_subdirectory(third-party/ARTSynchronized
                   ${CMAKE_CURRENT_BINARY_DIR}/ARTSynchronized
                   EXCLUDE_FROM_ALL)
 target_include_directories(ARTSynchronized INTERFACE
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../ARTSynchronized/..>)
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third-party>)
 list(APPEND THIRDPARTY_LIBS ARTSynchronized)
 
-# Optimistic-lock-coupling B+Tree memtable (memtable/olc_btree_rep.cc)
-# links against the BTreeOLC library the same way, instead of compiling
-# its sources inline.
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../BTreeOLC
-                  ${CMAKE_CURRENT_BINARY_DIR}/BTreeOLC
-                  EXCLUDE_FROM_ALL)
-target_include_directories(BTreeOLC INTERFACE
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../BTreeOLC/..>)
-list(APPEND THIRDPARTY_LIBS BTreeOLC)
 
 # Stall notifications eat some performance from inserts
 option(DISABLE_STALL_NOTIF "Build with stall notifications" OFF)
@@ -834,6 +824,7 @@ set(SOURCES
         memtable/skiplistrep.cc
         memtable/art_rep.cc
         memtable/olc_btree_rep.cc
+        memtable/btree/Tree.cpp
         memtable/simpleskiplistrep.cc
         memtable/dynamic_memtable_factory.cc
         memtable/vectorrep.cc
@@ -1331,14 +1322,6 @@ if(NOT WIN32 OR ROCKSDB_INSTALL_ON_WINDOWS)
     INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   )
 
-  install(
-    TARGETS BTreeOLC
-    EXPORT RocksDBTargets
-    COMPONENT devel
-    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-  )
-
   if(ROCKSDB_BUILD_SHARED)
     install(
       TARGETS ${ROCKSDB_SHARED_LIB}
@@ -1744,11 +1727,3 @@ option(WITH_BENCHMARK "build benchmark tests" OFF)
 if(WITH_BENCHMARK)
   add_subdirectory(${PROJECT_SOURCE_DIR}/microbench/)
 endif()
-
-set_source_files_properties(
-    memtable/ARTSynchronized/ART/Tree.cpp
-    memtable/ARTSynchronized/ART/N.cpp
-    memtable/ARTSynchronized/OptimisticLockCoupling/Tree.cpp
-    memtable/ARTSynchronized/Epoche.cpp
-    PROPERTIES COMPILE_FLAGS "-Wno-shadow -Wno-maybe-uninitialized -Wno-error=shadow -Wno-error=maybe-uninitialized -Wno-error"
-)

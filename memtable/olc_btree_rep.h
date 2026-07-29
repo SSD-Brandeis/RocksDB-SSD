@@ -2,7 +2,7 @@
 //
 // Replaces the previous TLXBTreeRep (global rwlock + write-gate around a
 // non-thread-safe vendored B+tree) with a fine-grained Optimistic Lock
-// Coupling B+Tree (BTreeOLC::Tree, lib/BTreeOLC/). Factory id 12 / the
+// Coupling B+Tree (BTree::Tree, memtable/btree/). Factory id 12 / the
 // CLI/Python-facing "tlx_btree" name are kept unchanged (see class comment
 // in the .cc file); only the internal C++ implementation is new.
 #pragma once
@@ -11,7 +11,7 @@
 
 #include "rocksdb/memtablerep.h"
 #include "rocksdb/slice_transform.h"
-#include "BTreeOLC/Tree.h"
+#include "memtable/btree/Tree.h"
 
 namespace rocksdb {
 
@@ -29,7 +29,7 @@ class OLCBTreeRepFactory : public MemTableRepFactory {
 
   virtual const char* Name() const override { return "OLCBTreeRepFactory"; }
 
-  // BTreeOLC::Tree uses optimistic lock coupling: reads never block, and
+  // BTree::Tree uses optimistic lock coupling: reads never block, and
   // writers only take write locks on the (small) contiguous run of full
   // ancestor nodes nearest the insertion point, so disjoint-leaf inserts
   // run fully in parallel. Safe under full read/write concurrency.
@@ -50,7 +50,7 @@ class OLCBTreeRep : public MemTableRep {
     Insert(handle);
   }
 
-  // BTreeOLC::Tree::insert is safe under concurrent callers (lock
+  // BTree::Tree::insert is safe under concurrent callers (lock
   // coupling with per-node write locks on only the contiguous full-ancestor
   // suffix nearest the leaf), so parallel write-group threads may insert
   // directly -- no serialization at the rep level, unlike the previous
@@ -81,7 +81,7 @@ class OLCBTreeRep : public MemTableRep {
   friend class OLCBTreeIterator;
   const MemTableRep::KeyComparator& cmp_;
   Allocator* const allocator_;
-  BTreeOLC::Tree tree_;
+  BTree::Tree tree_;
 };
 
 }  // namespace rocksdb

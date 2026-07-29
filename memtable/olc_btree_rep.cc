@@ -1,6 +1,6 @@
 // olc_btree_rep.cc
 //
-// See olc_btree_rep.h and lib/BTreeOLC/Tree.cpp for the full design
+// See olc_btree_rep.h and memtable/btree/Tree.cpp for the full design
 // rationale (replacing TLXBTreeRep's global rwlock + write-gate with a
 // fine-grained Optimistic Lock Coupling B+Tree).
 
@@ -11,19 +11,19 @@
 #include "db/dbformat.h"
 #include "db/memtable.h"
 #include "memory/arena.h"
-#include "memtable/key_comparator_wrapper.h"
+#include "memtable/stl_wrappers.h"
 #include "rocksdb/memtablerep.h"
 
 namespace rocksdb {
 
 namespace {
 
-// Glue between BTreeOLC's dependency-free runtime-callback interface
-// (LessFunc/AllocFunc, see lib/BTreeOLC/Tree.h) and RocksDB's actual
-// comparator/allocator types, so lib/BTreeOLC stays independent of
-// RocksDB (mirroring lib/ARTSynchronized's own independence).
+// Glue between BTree's dependency-free runtime-callback interface
+// (LessFunc/AllocFunc, see memtable/btree/Tree.h) and RocksDB's actual
+// comparator/allocator types, so memtable/btree stays independent of
+// RocksDB (mirroring third-party/ARTSynchronized's own independence).
 bool LessAdapter(void* ctx, const char* a, const char* b) {
-  return (*static_cast<const KeyComparatorWrapper*>(ctx))(a, b);
+  return (*static_cast<const stl_wrappers::Compare*>(ctx))(a, b);
 }
 
 void* NodeAllocAdapter(void* ctx, size_t size) {
@@ -36,9 +36,9 @@ OLCBTreeRep::OLCBTreeRep(const MemTableRep::KeyComparator& cmp, Allocator* alloc
     : MemTableRep(allocator),
       cmp_(cmp),
       allocator_(allocator),
-      tree_(&LessAdapter, new KeyComparatorWrapper(&cmp_), &NodeAllocAdapter, allocator) {}
+      tree_(&LessAdapter, new stl_wrappers::Compare(cmp_), &NodeAllocAdapter, allocator) {}
 
-// The KeyComparatorWrapper passed to Tree's constructor above is
+// The stl_wrappers::Compare passed to Tree's constructor above is
 // intentionally heap-allocated with `new` and never freed: Tree only
 // stores the raw `void*` context pointer and never owns it, and it must
 // outlive the Tree (i.e. the whole memtable's lifetime) -- allocating it
@@ -106,7 +106,7 @@ class OLCBTreeIterator : public MemTableRep::Iterator {
 
  private:
   OLCBTreeRep* rep_;
-  BTreeOLC::Tree::Cursor cursor_;
+  BTree::Tree::Cursor cursor_;
   std::string tmp_;
 };
 
