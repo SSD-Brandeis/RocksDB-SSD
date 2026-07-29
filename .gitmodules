@@ -1,4 +1,4 @@
 [submodule "third-party/ARTSynchronized"]
 	path = third-party/ARTSynchronized
 	url = https://github.com/SSD-Brandeis/ARTSynchronized.git
-	branch = LSMMemoryProfiling
+	branch = master
