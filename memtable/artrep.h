@@ -1,4 +1,4 @@
-// art_rep.h
+// artrep.h
 #pragma once
 
 #ifndef ROCKSDB_LITE
@@ -8,27 +8,10 @@
 #include "ARTSynchronized/OptimisticLockCoupling/Tree.h"
 #include "ARTSynchronized/Key.h"
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
-class ARTRepFactory : public MemTableRepFactory {
- public:
-  explicit ARTRepFactory() {}
-
-  virtual ~ARTRepFactory() {}
-
-  using MemTableRepFactory::CreateMemTableRep;
-
-  virtual MemTableRep* CreateMemTableRep(
-      const MemTableRep::KeyComparator& cmp, Allocator* allocator,
-      const SliceTransform* transform, Logger* logger) override;
-
-  virtual const char* Name() const override { return "ARTRepFactory"; }
-
-  // The underlying ART uses optimistic lock coupling; insert/lookup/range
-  // scans are safe under full read/write concurrency.
-  virtual bool IsInsertConcurrentlySupported() const override { return true; }
-};
-
+// ARTRepFactory is declared in rocksdb/memtablerep.h alongside the other
+// memtable factories; only the ARTRep implementation lives here.
 class ARTRep : public MemTableRep {
  public:
   explicit ARTRep(const MemTableRep::KeyComparator& cmp, Allocator* allocator);
@@ -69,6 +52,6 @@ class ARTRep : public MemTableRep {
   Allocator* const allocator_;
 };
 
-}  // namespace rocksdb
+}  // namespace ROCKSDB_NAMESPACE
 
 #endif  // ROCKSDB_LITE

@@ -1,4 +1,4 @@
-// olc_btree_rep.h
+// btreerep.h
 //
 // Replaces the previous TLXBTreeRep (global rwlock + write-gate around a
 // non-thread-safe vendored B+tree) with a fine-grained Optimistic Lock
@@ -13,34 +13,15 @@
 #include "rocksdb/slice_transform.h"
 #include "memtable/btree/Tree.h"
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
-class OLCBTreeRepFactory : public MemTableRepFactory {
+// BTreeRepFactory is declared in rocksdb/memtablerep.h alongside the
+// other memtable factories; only the BTreeRep implementation lives here.
+class BTreeRep : public MemTableRep {
  public:
-  explicit OLCBTreeRepFactory() {}
+  explicit BTreeRep(const MemTableRep::KeyComparator& cmp, Allocator* allocator);
 
-  virtual ~OLCBTreeRepFactory() {}
-
-  using MemTableRepFactory::CreateMemTableRep;
-
-  virtual MemTableRep* CreateMemTableRep(
-      const MemTableRep::KeyComparator& cmp, Allocator* allocator,
-      const SliceTransform* transform, Logger* logger) override;
-
-  virtual const char* Name() const override { return "OLCBTreeRepFactory"; }
-
-  // BTree::Tree uses optimistic lock coupling: reads never block, and
-  // writers only take write locks on the (small) contiguous run of full
-  // ancestor nodes nearest the insertion point, so disjoint-leaf inserts
-  // run fully in parallel. Safe under full read/write concurrency.
-  virtual bool IsInsertConcurrentlySupported() const override { return true; }
-};
-
-class OLCBTreeRep : public MemTableRep {
- public:
-  explicit OLCBTreeRep(const MemTableRep::KeyComparator& cmp, Allocator* allocator);
-
-  virtual ~OLCBTreeRep() override {}
+  virtual ~BTreeRep() override {}
 
   virtual KeyHandle Allocate(const size_t len, char** buf) override;
 
@@ -64,7 +45,7 @@ class OLCBTreeRep : public MemTableRep {
   virtual bool Contains(const char* key) const override;
 
   // Not tracked, same pre-existing limitation shared with ARTRep
-  // (art_rep.cc) and the previous TLXBTreeRep.
+  // (artrep.cc) and the previous TLXBTreeRep.
   virtual size_t ApproximateMemoryUsage() override { return 0; }
 
   virtual void Get(const LookupKey& k, void* callback_args,
@@ -78,12 +59,12 @@ class OLCBTreeRep : public MemTableRep {
   }
 
  private:
-  friend class OLCBTreeIterator;
+  friend class BTreeIterator;
   const MemTableRep::KeyComparator& cmp_;
   Allocator* const allocator_;
   BTree::Tree tree_;
 };
 
-}  // namespace rocksdb
+}  // namespace ROCKSDB_NAMESPACE
 
 #endif  // ROCKSDB_LITE

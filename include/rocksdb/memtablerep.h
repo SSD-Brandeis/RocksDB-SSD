@@ -574,6 +574,46 @@ class LinkListRepFactory : public MemTableRepFactory {
   bool IsInsertConcurrentlySupported() const override { return true; }
 };
 
+// Concurrent ART (Adaptive Radix Tree) memtable using optimistic lock
+// coupling (see memtable/artrep.h, third-party/ARTSynchronized). Safe under
+// full read/write concurrency.
+class ARTRepFactory : public MemTableRepFactory {
+ public:
+  explicit ARTRepFactory() {}
+
+  virtual ~ARTRepFactory() {}
+
+  using MemTableRepFactory::CreateMemTableRep;
+
+  virtual MemTableRep* CreateMemTableRep(
+      const MemTableRep::KeyComparator& cmp, Allocator* allocator,
+      const SliceTransform* transform, Logger* logger) override;
+
+  virtual const char* Name() const override { return "ARTRepFactory"; }
+
+  virtual bool IsInsertConcurrentlySupported() const override { return true; }
+};
+
+// Concurrent B+Tree memtable using optimistic lock coupling (see
+// memtable/btreerep.h, memtable/btree). Safe under full read/write
+// concurrency.
+class BTreeRepFactory : public MemTableRepFactory {
+ public:
+  explicit BTreeRepFactory() {}
+
+  virtual ~BTreeRepFactory() {}
+
+  using MemTableRepFactory::CreateMemTableRep;
+
+  virtual MemTableRep* CreateMemTableRep(
+      const MemTableRep::KeyComparator& cmp, Allocator* allocator,
+      const SliceTransform* transform, Logger* logger) override;
+
+  virtual const char* Name() const override { return "BTreeRepFactory"; }
+
+  virtual bool IsInsertConcurrentlySupported() const override { return true; }
+};
+
 // ---------------------------------------------------------------------------
 // DynamicMemtableFactory
 // ---------------------------------------------------------------------------

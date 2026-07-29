@@ -9,8 +9,8 @@
 // concurrent-tree memtables in this project share one well-established
 // synchronization technique.
 
-#ifndef BTREE_OLC_NODE_H
-#define BTREE_OLC_NODE_H
+#ifndef BTREE_NODE_H
+#define BTREE_NODE_H
 
 #include <atomic>
 #include <cstdint>
@@ -150,4 +150,4 @@ struct RootHolder : public NodeHeader {
 
 }  // namespace BTree
 
-#endif  // BTREE_OLC_NODE_H
+#endif  // BTREE_NODE_H

@@ -1,10 +1,10 @@
-// olc_btree_rep.cc
+// btreerep.cc
 //
-// See olc_btree_rep.h and memtable/btree/Tree.cpp for the full design
+// See btreerep.h and memtable/btree/Tree.cpp for the full design
 // rationale (replacing TLXBTreeRep's global rwlock + write-gate with a
 // fine-grained Optimistic Lock Coupling B+Tree).
 
-#include "memtable/olc_btree_rep.h"
+#include "memtable/btreerep.h"
 
 #ifndef ROCKSDB_LITE
 
@@ -14,7 +14,7 @@
 #include "memtable/stl_wrappers.h"
 #include "rocksdb/memtablerep.h"
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
 namespace {
 
@@ -32,7 +32,7 @@ void* NodeAllocAdapter(void* ctx, size_t size) {
 
 }  // namespace
 
-OLCBTreeRep::OLCBTreeRep(const MemTableRep::KeyComparator& cmp, Allocator* allocator)
+BTreeRep::BTreeRep(const MemTableRep::KeyComparator& cmp, Allocator* allocator)
     : MemTableRep(allocator),
       cmp_(cmp),
       allocator_(allocator),
@@ -46,29 +46,29 @@ OLCBTreeRep::OLCBTreeRep(const MemTableRep::KeyComparator& cmp, Allocator* alloc
 // state would work too, but a single ~24-byte fixed allocation for the
 // rep's lifetime is not worth adding an extra AllocFunc call for.
 
-KeyHandle OLCBTreeRep::Allocate(const size_t len, char** buf) {
+KeyHandle BTreeRep::Allocate(const size_t len, char** buf) {
   *buf = allocator_->Allocate(len);
   return static_cast<KeyHandle>(*buf);
 }
 
-void OLCBTreeRep::Insert(KeyHandle handle) {
+void BTreeRep::Insert(KeyHandle handle) {
   const char* key = static_cast<const char*>(handle);
   tree_.insert(key);
 }
 
-bool OLCBTreeRep::Contains(const char* key) const { return tree_.contains(key); }
+bool BTreeRep::Contains(const char* key) const { return tree_.contains(key); }
 
-void OLCBTreeRep::Get(const LookupKey& k, void* callback_args,
+void BTreeRep::Get(const LookupKey& k, void* callback_args,
                      bool (*callback_func)(void* arg, const char* entry)) {
   const char* target = k.memtable_key().data();
   tree_.lookupRange(target, callback_args, callback_func);
 }
 
-class OLCBTreeIterator : public MemTableRep::Iterator {
+class BTreeIterator : public MemTableRep::Iterator {
  public:
-  explicit OLCBTreeIterator(OLCBTreeRep* rep) : rep_(rep) {}
+  explicit BTreeIterator(BTreeRep* rep) : rep_(rep) {}
 
-  virtual ~OLCBTreeIterator() override {}
+  virtual ~BTreeIterator() override {}
 
   virtual bool Valid() const override { return cursor_.valid; }
 
@@ -105,30 +105,26 @@ class OLCBTreeIterator : public MemTableRep::Iterator {
   virtual void SeekToLast() override { rep_->tree_.seekToLast(&cursor_); }
 
  private:
-  OLCBTreeRep* rep_;
+  BTreeRep* rep_;
   BTree::Tree::Cursor cursor_;
   std::string tmp_;
 };
 
-MemTableRep::Iterator* OLCBTreeRep::GetIterator(Arena* arena) {
+MemTableRep::Iterator* BTreeRep::GetIterator(Arena* arena) {
   if (arena != nullptr) {
-    void* mem = arena->AllocateAligned(sizeof(OLCBTreeIterator));
-    return new (mem) OLCBTreeIterator(this);
+    void* mem = arena->AllocateAligned(sizeof(BTreeIterator));
+    return new (mem) BTreeIterator(this);
   } else {
-    return new OLCBTreeIterator(this);
+    return new BTreeIterator(this);
   }
 }
 
-MemTableRep* OLCBTreeRepFactory::CreateMemTableRep(
+MemTableRep* BTreeRepFactory::CreateMemTableRep(
     const MemTableRep::KeyComparator& cmp, Allocator* allocator,
     const SliceTransform* transform, Logger* logger) {
-  return new OLCBTreeRep(cmp, allocator);
+  return new BTreeRep(cmp, allocator);
 }
 
-MemTableRepFactory* NewOLCBTreeRepFactory() {
-  return new OLCBTreeRepFactory();
-}
-
-}  // namespace rocksdb
+}  // namespace ROCKSDB_NAMESPACE
 
 #endif  // ROCKSDB_LITE

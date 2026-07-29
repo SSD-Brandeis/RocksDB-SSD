@@ -422,7 +422,7 @@ if(WITH_TBB)
   list(APPEND THIRDPARTY_LIBS TBB::TBB)
 endif()
 
-# Synchronized ART memtable (memtable/art_rep.cc)
+# Synchronized ART memtable (memtable/artrep.cc)
 add_subdirectory(third-party/ARTSynchronized
                   ${CMAKE_CURRENT_BINARY_DIR}/ARTSynchronized
                   EXCLUDE_FROM_ALL)
@@ -822,8 +822,8 @@ set(SOURCES
         memtable/hash_skiplist_rep.cc
         memtable/hash_vector_rep.cc
         memtable/skiplistrep.cc
-        memtable/art_rep.cc
-        memtable/olc_btree_rep.cc
+        memtable/artrep.cc
+        memtable/btreerep.cc
         memtable/btree/Tree.cpp
         memtable/simpleskiplistrep.cc
         memtable/dynamic_memtable_factory.cc

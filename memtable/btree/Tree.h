@@ -12,8 +12,8 @@
 // uses for its LoadKeyFunction), not templates or virtual interfaces, so
 // this stays a single ordinary (non-template) translation unit.
 
-#ifndef BTREE_OLC_TREE_H
-#define BTREE_OLC_TREE_H
+#ifndef BTREE_TREE_H
+#define BTREE_TREE_H
 
 #include <cstddef>
 #include "Node.h"
@@ -135,4 +135,4 @@ class Tree {
 
 }  // namespace BTree
 
-#endif  // BTREE_OLC_TREE_H
+#endif  // BTREE_TREE_H
