@@ -1,9 +1,9 @@
-// art_rep.cc
+// artrep.cc
 //
 
 #pragma GCC diagnostic ignored "-Wshadow"
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#include "memtable/art_rep.h"
+#include "memtable/artrep.h"
 
 #ifndef ROCKSDB_LITE
 
@@ -16,16 +16,12 @@
 #include "util/string_util.h"
 #include <endian.h>
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
 MemTableRep* ARTRepFactory::CreateMemTableRep(
     const MemTableRep::KeyComparator& cmp, Allocator* allocator,
     const SliceTransform* transform, Logger* logger) {
   return new ARTRep(cmp, allocator);
-}
-
-MemTableRepFactory* NewARTRepFactory() {
-  return new ARTRepFactory();
 }
 
 void ARTRep::EncodeARTKey(const char* memtable_key, Key& art_key) {
@@ -281,6 +277,6 @@ MemTableRep::Iterator* ARTRep::GetIterator(Arena* arena) {
   }
 }
 
-}  // namespace rocksdb
+}  // namespace ROCKSDB_NAMESPACE
 
 #endif  // ROCKSDB_LITE

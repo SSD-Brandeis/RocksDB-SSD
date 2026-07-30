@@ -139,16 +139,18 @@ LIB_SOURCES =                                                   \
   memory/memkind_kmem_allocator.cc                              \
   memory/memory_allocator.cc                                    \
   memtable/alloc_tracker.cc                                     \
+  memtable/artrep.cc                                            \
+  memtable/btree_rep.cc                                         \
+  memtable/dynamic_memtable_factory.cc                          \
   memtable/hash_linklist_rep.cc                                 \
   memtable/hash_skiplist_rep.cc                                 \
+  memtable/hash_vector_rep.cc                                   \
+  memtable/inplace_update_sortedvectorrep.cc                    \
+  memtable/linklistrep.cc                                       \
+  memtable/simpleskiplistrep.cc                                 \
   memtable/skiplistrep.cc                                       \
-  memtable/art_rep.cc                                           \
-  memtable/ARTSynchronized/ART/Tree.cpp                         \
-  memtable/ARTSynchronized/ART/N.cpp                            \
-  memtable/ARTSynchronized/OptimisticLockCoupling/Tree.cpp      \
-  memtable/ARTSynchronized/Epoche.cpp                           \
-  memtable/tlx_btree_rep.cc                                     \
-  memtable/tlx/die/core.cpp                                     \
+  memtable/sortedvectorrep.cc                                   \
+  memtable/unsortedvectorrep.cc                                 \
   memtable/vectorrep.cc                                         \
   memtable/wbwi_memtable.cc                                     \
   memtable/write_buffer_manager.cc                              \

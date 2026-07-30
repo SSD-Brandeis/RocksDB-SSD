@@ -422,13 +422,12 @@ if(WITH_TBB)
   list(APPEND THIRDPARTY_LIBS TBB::TBB)
 endif()
 
-# Synchronized ART memtable (memtable/art_rep.cc) links against the
-# ARTSynchronized library instead of compiling its sources inline.
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../ARTSynchronized
+# Synchronized ART memtable (memtable/artrep.cc)
+add_subdirectory(third-party/ARTSynchronized
                   ${CMAKE_CURRENT_BINARY_DIR}/ARTSynchronized
                   EXCLUDE_FROM_ALL)
 target_include_directories(ARTSynchronized INTERFACE
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../ARTSynchronized/..>)
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third-party>)
 list(APPEND THIRDPARTY_LIBS ARTSynchronized)
 
 # Stall notifications eat some performance from inserts
@@ -822,7 +821,7 @@ set(SOURCES
         memtable/hash_skiplist_rep.cc
         memtable/hash_vector_rep.cc
         memtable/skiplistrep.cc
-        memtable/art_rep.cc
+        memtable/artrep.cc
         memtable/btree_rep.cc
         memtable/simpleskiplistrep.cc
         memtable/dynamic_memtable_factory.cc
@@ -1726,11 +1725,3 @@ option(WITH_BENCHMARK "build benchmark tests" OFF)
 if(WITH_BENCHMARK)
   add_subdirectory(${PROJECT_SOURCE_DIR}/microbench/)
 endif()
-
-set_source_files_properties(
-    memtable/ARTSynchronized/ART/Tree.cpp
-    memtable/ARTSynchronized/ART/N.cpp
-    memtable/ARTSynchronized/OptimisticLockCoupling/Tree.cpp
-    memtable/ARTSynchronized/Epoche.cpp
-    PROPERTIES COMPILE_FLAGS "-Wno-shadow -Wno-maybe-uninitialized -Wno-error=shadow -Wno-error=maybe-uninitialized -Wno-error"
-)
