@@ -1,28 +1,90 @@
-// artrep.cc
+//  Custom implementation from SSD-Lab
+//
+//  Arts is a MemTableRep implementation that uses a ARTSynchronized which forked
+//  from https://github.com/flode/ARTSynchronized to intergrate it with RocksDB.
+//  It is a trie-based data structure which improves memory footprint by storing
+//  keys with similar prefix in a succinct manner.
 //
 
-#pragma GCC diagnostic ignored "-Wshadow"
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#include "memtable/artrep.h"
-
-#ifndef ROCKSDB_LITE
-
+#include "ARTSynchronized/OptimisticLockCoupling/Tree.h"
+#include "ARTSynchronized/Key.h"
 #include "db/dbformat.h"
 #include "rocksdb/memtablerep.h"
+#include "rocksdb/slice_transform.h"
 #include "db/memtable.h"
 #include "memory/arena.h"
 #include "port/port.h"
 #include "util/coding.h"
 #include "util/string_util.h"
+#include <atomic>
+#include <cstdint>
 #include <endian.h>
 
 namespace ROCKSDB_NAMESPACE {
+namespace {
 
-MemTableRep* ARTRepFactory::CreateMemTableRep(
-    const MemTableRep::KeyComparator& cmp, Allocator* allocator,
-    const SliceTransform* transform, Logger* logger) {
-  return new ARTRep(cmp, allocator);
-}
+// Points ART_OLC::N's node allocator at this tree's byte counter for the
+// scope's duration, so node memory (allocated outside the arena) is
+// visible to ApproximateMemoryUsage().
+class ARTNodeAccountingScope {
+ public:
+  explicit ARTNodeAccountingScope(std::atomic<int64_t>* counter)
+      : prev_(ART::MemoryAccounting::currentUsageCounter) {
+    ART::MemoryAccounting::currentUsageCounter = counter;
+  }
+  ~ARTNodeAccountingScope() { ART::MemoryAccounting::currentUsageCounter = prev_; }
+
+  ARTNodeAccountingScope(const ARTNodeAccountingScope&) = delete;
+  ARTNodeAccountingScope& operator=(const ARTNodeAccountingScope&) = delete;
+
+ private:
+  std::atomic<int64_t>* prev_;
+};
+
+class ARTRep : public MemTableRep {
+ public:
+  explicit ARTRep(const MemTableRep::KeyComparator& cmp, Allocator* allocator);
+
+  virtual ~ARTRep() override;
+
+  virtual KeyHandle Allocate(const size_t len, char** buf) override;
+
+  virtual void Insert(KeyHandle handle) override;
+
+  virtual void InsertWithHint(KeyHandle handle, void** hint) override { Insert(handle); }
+
+  virtual void InsertConcurrently(KeyHandle handle) override;
+
+  virtual void InsertWithHintConcurrently(KeyHandle handle, void** hint) override { InsertConcurrently(handle); }
+
+  virtual bool Contains(const char* key) const override;
+
+  virtual size_t ApproximateMemoryUsage() override;
+
+  virtual void Get(const LookupKey& k, void* callback_args,
+                   bool (*callback_func)(void* arg, const char* entry)) override;
+
+  virtual MemTableRep::Iterator* GetIterator(Arena* arena = nullptr) override;
+
+  virtual MemTableRep::Iterator* GetDynamicPrefixIterator(
+      Arena* arena = nullptr) override {
+    return GetIterator(arena);
+  }
+
+  // ART specific encoding
+  static void EncodeARTKey(const char* memtable_key, Key& art_key);
+  static void LoadKeyFromTID(TID tid, Key& key);
+
+ private:
+  ART_OLC::Tree tree_;
+  const MemTableRep::KeyComparator& cmp_;
+  Allocator* const allocator_;
+  // Bytes held by this tree's internal nodes (mutable: Contains() is const
+  // but can still trigger epoch-deferred node reclamation). Tree's own
+  // constructor allocates the root N256 before any scope can be active, so
+  // that fixed one-time cost is seeded here rather than captured live.
+  mutable std::atomic<int64_t> node_bytes_{sizeof(ART_OLC::N256)};
+};
 
 void ARTRep::EncodeARTKey(const char* memtable_key, Key& art_key) {
   uint32_t key_length;
@@ -53,6 +115,7 @@ KeyHandle ARTRep::Allocate(const size_t len, char** buf) {
 }
 
 void ARTRep::Insert(KeyHandle handle) {
+  ARTNodeAccountingScope scope(&node_bytes_);
   Key key;
   const char* memtable_key = static_cast<const char*>(handle);
   EncodeARTKey(memtable_key, key);
@@ -68,6 +131,7 @@ void ARTRep::InsertConcurrently(KeyHandle handle) {
 }
 
 bool ARTRep::Contains(const char* key) const {
+  ARTNodeAccountingScope scope(&node_bytes_);
   Key art_key;
   EncodeARTKey(key, art_key);
   auto threadInfo = const_cast<ARTRep*>(this)->tree_.getThreadInfo();
@@ -76,11 +140,15 @@ bool ARTRep::Contains(const char* key) const {
 }
 
 size_t ARTRep::ApproximateMemoryUsage() {
-  return 0;
+  // Leaf bytes go through the arena and are already counted;
+  // this reports only the tree's internal-node overhead.
+  int64_t bytes = node_bytes_.load(std::memory_order_relaxed);
+  return static_cast<size_t>(bytes > 0 ? bytes : 0);
 }
 
 void ARTRep::Get(const LookupKey& k, void* callback_args,
                  bool (*callback_func)(void* arg, const char* entry)) {
+  ARTNodeAccountingScope scope(&node_bytes_);
   static constexpr size_t kBatch = 64;
   Key cur_key;
   EncodeARTKey(k.memtable_key().data(), cur_key);
@@ -118,9 +186,10 @@ void ARTRep::Get(const LookupKey& k, void* callback_args,
 
 class ARTIterator : public MemTableRep::Iterator {
  public:
-  explicit ARTIterator(const ART_OLC::Tree* tree)
-      : tree_(tree), valid_(false), reverse_(false), buffer_idx_(0),
-        buffer_len_(0) {}
+  explicit ARTIterator(const ART_OLC::Tree* tree,
+                       std::atomic<int64_t>* node_bytes)
+      : tree_(tree), node_bytes_(node_bytes), valid_(false), reverse_(false),
+        buffer_idx_(0), buffer_len_(0) {}
 
   virtual ~ARTIterator() override {}
 
@@ -231,6 +300,7 @@ class ARTIterator : public MemTableRep::Iterator {
   }
 
   void Refill(const Key& start_key, bool inclusive, bool backward) {
+    ARTNodeAccountingScope scope(node_bytes_);
     buffer_len_ = 0;
     buffer_idx_ = 0;
     valid_ = false;
@@ -260,6 +330,7 @@ class ARTIterator : public MemTableRep::Iterator {
   }
 
   const ART_OLC::Tree* tree_;
+  std::atomic<int64_t>* node_bytes_;
   bool valid_;
 
   bool reverse_;
@@ -271,12 +342,18 @@ class ARTIterator : public MemTableRep::Iterator {
 MemTableRep::Iterator* ARTRep::GetIterator(Arena* arena) {
   if (arena != nullptr) {
     void* mem = arena->AllocateAligned(sizeof(ARTIterator));
-    return new (mem) ARTIterator(&tree_);
+    return new (mem) ARTIterator(&tree_, &node_bytes_);
   } else {
-    return new ARTIterator(&tree_);
+    return new ARTIterator(&tree_, &node_bytes_);
   }
 }
 
-}  // namespace ROCKSDB_NAMESPACE
+}  // namespace
 
-#endif  // ROCKSDB_LITE
+MemTableRep* ARTRepFactory::CreateMemTableRep(
+    const MemTableRep::KeyComparator& cmp, Allocator* allocator,
+    const SliceTransform* transform, Logger* logger) {
+  return new ARTRep(cmp, allocator);
+}
+
+}  // namespace ROCKSDB_NAMESPACE

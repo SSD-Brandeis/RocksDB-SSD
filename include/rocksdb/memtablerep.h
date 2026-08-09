@@ -574,9 +574,7 @@ class LinkListRepFactory : public MemTableRepFactory {
   bool IsInsertConcurrentlySupported() const override { return true; }
 };
 
-// Concurrent ART (Adaptive Radix Tree) memtable using optimistic lock
-// coupling (see memtable/artrep.h, third-party/ARTSynchronized). Safe under
-// full read/write concurrency.
+// Concurrent ART (Adaptive Radix Tree) memtable using optimistic lock coupling
 class ARTRepFactory : public MemTableRepFactory {
  public:
   explicit ARTRepFactory() {}
@@ -594,9 +592,7 @@ class ARTRepFactory : public MemTableRepFactory {
   virtual bool IsInsertConcurrentlySupported() const override { return true; }
 };
 
-// Concurrent B+Tree memtable using optimistic lock coupling (see
-// memtable/btreerep.h, memtable/btree). Safe under full read/write
-// concurrency.
+// Concurrent B+Tree memtable using optimistic lock coupling
 class BTreeRepFactory : public MemTableRepFactory {
  public:
   explicit BTreeRepFactory() {}
