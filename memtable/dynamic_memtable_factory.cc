@@ -14,6 +14,8 @@
 
 namespace ROCKSDB_NAMESPACE {
 
+MemTableRepFactory* NewOLCBTreeRepFactory();
+
 namespace {
 
 // Returns true for the type ids whose factories declare concurrent-insert
@@ -25,6 +27,9 @@ static bool TypeSupportsConcurrentInsert(int type) {
     case 5: // UnsortedVector
     case 6: // SortedVector
     case 7: // LinkList
+    case 8: // SimpleSkipList
+    case 11: // ART
+    case 12: // BTree
       return true;
     default:
       return false;
@@ -42,6 +47,8 @@ static const char* TypeName(int type) {
     case 7: return "LinkList";
     case 8: return "SimpleSkipList";
     case 9: return "HashVector";
+    case 11: return "ART";
+    case 12: return "BTree";
     default: return "Unknown";
   }
 }
@@ -126,6 +133,12 @@ class DynamicMemtableFactory : public MemTableRepFactory {
         if (!has_prefix) break;
         return std::unique_ptr<MemTableRepFactory>(
             NewHashVectorRepFactory(cfg_.bucket_count));
+
+      case 11:
+        return std::make_unique<ARTRepFactory>();
+
+      case 12:
+        return std::unique_ptr<MemTableRepFactory>(NewOLCBTreeRepFactory());
 
       default:
         break;
