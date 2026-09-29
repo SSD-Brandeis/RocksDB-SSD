@@ -639,6 +639,9 @@ class MemtableAdvisor {
 struct DynamicMemtableConfig {
   size_t   vector_prealloc        = 0;
   size_t   bucket_count           = 50000;
+  size_t   hash_skiplist_bucket_count = 0;
+  size_t   hash_linklist_bucket_count = 0;
+  size_t   hash_vector_bucket_count   = 0;
   int32_t  skiplist_height        = 4;
   int32_t  skiplist_branch        = 4;
   size_t   huge_page_tlb_size     = 0;

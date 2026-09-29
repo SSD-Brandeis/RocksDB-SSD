@@ -1897,6 +1897,72 @@ DEFINE_uint32(openandcompact_cancel_after_millseconds, 1,
               "openandcompact_test_cancel_on_odd is true");
 
 namespace ROCKSDB_NAMESPACE {
+MemTableRepFactory* NewOLCBTreeRepFactory();
+
+static size_t FactoryCount(const std::string& uri, size_t fallback) {
+  auto colon = uri.find(':');
+  return colon == std::string::npos ? fallback
+                                    : ParseSizeT(uri.substr(colon + 1));
+}
+
+static void RegisterForkMemTableRepFactories() {
+  static std::once_flag once;
+  std::call_once(once, []() {
+    auto library = ObjectLibrary::Default();
+    auto counted = [](const char* name, const char* nick) {
+      auto pattern = ObjectLibrary::PatternEntry(name, true);
+      pattern.AnotherName(nick);
+      pattern.AddNumber(":");
+      return pattern;
+    };
+    library->AddFactory<MemTableRepFactory>(
+        counted(SimpleSkipListFactory::kClassName(),
+                SimpleSkipListFactory::kNickName()),
+        [](const std::string&, std::unique_ptr<MemTableRepFactory>* guard,
+           std::string*) {
+          guard->reset(new SimpleSkipListFactory());
+          return guard->get();
+        });
+    library->AddFactory<MemTableRepFactory>(
+        counted(UnsortedVectorRepFactory::kClassName(),
+                UnsortedVectorRepFactory::kNickName()),
+        [](const std::string& uri, std::unique_ptr<MemTableRepFactory>* guard,
+           std::string*) {
+          guard->reset(new UnsortedVectorRepFactory(FactoryCount(uri, 0)));
+          return guard->get();
+        });
+    library->AddFactory<MemTableRepFactory>(
+        counted(SortedVectorRepFactory::kClassName(),
+                SortedVectorRepFactory::kNickName()),
+        [](const std::string& uri, std::unique_ptr<MemTableRepFactory>* guard,
+           std::string*) {
+          guard->reset(new SortedVectorRepFactory(FactoryCount(uri, 0)));
+          return guard->get();
+        });
+    library->AddFactory<MemTableRepFactory>(
+        counted("HashVectorRepFactory", "hash_vector"),
+        [](const std::string& uri, std::unique_ptr<MemTableRepFactory>* guard,
+           std::string*) {
+          guard->reset(NewHashVectorRepFactory(FactoryCount(uri, 50000)));
+          return guard->get();
+        });
+    library->AddFactory<MemTableRepFactory>(
+        "ARTRepFactory",
+        [](const std::string&, std::unique_ptr<MemTableRepFactory>* guard,
+           std::string*) {
+          guard->reset(new ARTRepFactory());
+          return guard->get();
+        });
+    library->AddFactory<MemTableRepFactory>(
+        "OLCBTreeRepFactory",
+        [](const std::string&, std::unique_ptr<MemTableRepFactory>* guard,
+           std::string*) {
+          guard->reset(NewOLCBTreeRepFactory());
+          return guard->get();
+        });
+  });
+}
+
 namespace {
 static Status CreateMemTableRepFactory(
     const ConfigOptions& config_options,
@@ -9090,6 +9156,7 @@ int db_bench_tool(int argc, char** argv, ToolHooks& hooks) {
     SetVersionString(GetRocksVersionAsString(true));
     initialized = true;
   }
+  RegisterForkMemTableRepFactories();
   ParseCommandLineFlags(&argc, &argv, true);
   FLAGS_compaction_style_e =
       (ROCKSDB_NAMESPACE::CompactionStyle)FLAGS_compaction_style;

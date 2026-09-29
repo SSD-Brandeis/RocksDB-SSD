@@ -72,9 +72,17 @@ class DynamicMemtableFactory : public MemTableRepFactory {
     const int type = advisor_->SelectMemtableType(has_prefix);
     last_type_.store(type, std::memory_order_relaxed);
 
-    ROCKS_LOG_INFO(logger, "[DynamicMemtableFactory] selected %s%s",
-                   TypeName(type),
-                   has_prefix ? " (prefix extractor active)" : "");
+    const size_t buckets = has_prefix ? HashBuckets(type) : 0;
+    if (buckets > 0) {
+      ROCKS_LOG_INFO(logger,
+                     "[DynamicMemtableFactory] selected %s (prefix extractor "
+                     "active) bucket_count=%zu",
+                     TypeName(type), buckets);
+    } else {
+      ROCKS_LOG_INFO(logger, "[DynamicMemtableFactory] selected %s%s",
+                     TypeName(type),
+                     has_prefix ? " (prefix extractor active)" : "");
+    }
 
     auto sub = MakeSubFactory(type, has_prefix);
     return sub->CreateMemTableRep(cmp, allocator, transform, logger);
@@ -93,6 +101,23 @@ class DynamicMemtableFactory : public MemTableRepFactory {
   const DynamicMemtableConfig cfg_;
   mutable std::atomic<int>  last_type_;
 
+  size_t Buckets(size_t per_type) const {
+    return per_type > 0 ? per_type : cfg_.bucket_count;
+  }
+
+  size_t HashBuckets(int type) const {
+    switch (type) {
+      case 3:
+        return Buckets(cfg_.hash_skiplist_bucket_count);
+      case 4:
+        return Buckets(cfg_.hash_linklist_bucket_count);
+      case 9:
+        return Buckets(cfg_.hash_vector_bucket_count);
+      default:
+        return 0;
+    }
+  }
+
   // Builds a one-shot sub-factory for the given type id.
   // Falls back to SkipList when a prefix-required type is requested but no
   // prefix extractor is active.
@@ -105,13 +130,13 @@ class DynamicMemtableFactory : public MemTableRepFactory {
       case 3:
         if (!has_prefix) break;
         return std::unique_ptr<MemTableRepFactory>(
-            NewHashSkipListRepFactory(cfg_.bucket_count, cfg_.skiplist_height,
+            NewHashSkipListRepFactory(Buckets(cfg_.hash_skiplist_bucket_count), cfg_.skiplist_height,
                                      cfg_.skiplist_branch));
 
       case 4:
         if (!has_prefix) break;
         return std::unique_ptr<MemTableRepFactory>(
-            NewHashLinkListRepFactory(cfg_.bucket_count,
+            NewHashLinkListRepFactory(Buckets(cfg_.hash_linklist_bucket_count),
                                      cfg_.huge_page_tlb_size,
                                      cfg_.linklist_log_threshold,
                                      cfg_.linklist_log_dist,
@@ -132,7 +157,7 @@ class DynamicMemtableFactory : public MemTableRepFactory {
       case 9:
         if (!has_prefix) break;
         return std::unique_ptr<MemTableRepFactory>(
-            NewHashVectorRepFactory(cfg_.bucket_count));
+            NewHashVectorRepFactory(Buckets(cfg_.hash_vector_bucket_count)));
 
       case 11:
         return std::make_unique<ARTRepFactory>();
