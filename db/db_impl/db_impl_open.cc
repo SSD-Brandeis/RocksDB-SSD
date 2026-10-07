@@ -9,6 +9,7 @@
 #include <cinttypes>
 
 #include "db/builder.h"
+#include "db/key_stream_monitor.h"
 #include "db/db_impl/db_impl.h"
 #include "db/error_handler.h"
 #include "db/periodic_task_scheduler.h"
@@ -2660,6 +2661,7 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
   }
 
   if (s.ok()) {
+    KeyStreamMonitor::Instance().Attach(impl->immutable_db_options_.info_log);
     ROCKS_LOG_HEADER(impl->immutable_db_options_.info_log, "DB pointer %p",
                      impl.get());
     LogFlush(impl->immutable_db_options_.info_log);

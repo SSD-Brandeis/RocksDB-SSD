@@ -7,6 +7,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 #include "db/db_impl/db_impl.h"
+#include "db/key_stream_monitor.h"
 
 #include <cstdint>
 #ifdef OS_SOLARIS
@@ -508,6 +509,7 @@ void DBImpl::UntrackDataFiles() {
 }
 
 Status DBImpl::CloseHelper() {
+  KeyStreamMonitor::Instance().Detach();
   // Guarantee that there is no background error recovery in progress before
   // continuing with the shutdown
   mutex_.Lock();
@@ -2330,6 +2332,9 @@ bool DBImpl::ShouldReferenceSuperVersion(const MergeContext& merge_context) {
 
 Status DBImpl::GetImpl(const ReadOptions& read_options, const Slice& key,
                        GetImplOptions& get_impl_options) {
+  if (KeyStreamMonitor::Instance().enabled()) {
+    KeyStreamMonitor::Instance().OnGet(key);
+  }
   assert(get_impl_options.value != nullptr ||
          get_impl_options.merge_operands != nullptr ||
          get_impl_options.columns != nullptr);
@@ -2813,6 +2818,11 @@ void DBImpl::MultiGet(const ReadOptions& _read_options, const size_t num_keys,
                       ColumnFamilyHandle** column_families, const Slice* keys,
                       PinnableSlice* values, std::string* timestamps,
                       Status* statuses, const bool sorted_input) {
+  if (KeyStreamMonitor::Instance().enabled()) {
+    for (size_t i = 0; i < num_keys; ++i) {
+      KeyStreamMonitor::Instance().OnGet(keys[i]);
+    }
+  }
   if (_read_options.io_activity != Env::IOActivity::kUnknown &&
       _read_options.io_activity != Env::IOActivity::kMultiGet) {
     Status s = Status::InvalidArgument(

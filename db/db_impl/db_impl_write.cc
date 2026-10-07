@@ -9,6 +9,7 @@
 #include <cinttypes>
 
 #include "db/db_impl/db_impl.h"
+#include "db/key_stream_monitor.h"
 #include "db/error_handler.h"
 #include "db/event_helpers.h"
 #include "logging/logging.h"
@@ -375,6 +376,9 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
                          PreReleaseCallback* pre_release_callback,
                          PostMemTableCallback* post_memtable_callback,
                          std::shared_ptr<WriteBatchWithIndex> wbwi) {
+  if (my_batch != nullptr && KeyStreamMonitor::Instance().enabled()) {
+    KeyStreamMonitor::Instance().OnWriteBatch(my_batch);
+  }
   assert(!seq_per_batch_ || batch_cnt != 0);
   assert(my_batch == nullptr || my_batch->Count() == 0 ||
          write_options.protection_bytes_per_key == 0 ||

@@ -8,6 +8,7 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
 #include "db/db_iter.h"
+#include "db/key_stream_monitor.h"
 
 #include <limits>
 #include <string>
@@ -1629,6 +1630,9 @@ void DBIter::Prepare(const MultiScanArgs& scan_opts) {
 }
 
 void DBIter::Seek(const Slice& target) {
+  if (KeyStreamMonitor::Instance().enabled()) {
+    KeyStreamMonitor::Instance().OnSeek(target);
+  }
   PERF_COUNTER_ADD(iter_seek_count, 1);
   PERF_CPU_TIMER_GUARD(iter_seek_cpu_nanos, clock_);
   StopWatch sw(clock_, statistics_, DB_SEEK);
