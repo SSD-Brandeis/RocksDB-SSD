@@ -10,6 +10,8 @@
 
 #include "db/db_impl/db_impl.h"
 #include "db/key_stream_monitor.h"
+#include "db/phase_controller.h"
+#include "db/write_batch_internal.h"
 #include "db/error_handler.h"
 #include "db/event_helpers.h"
 #include "logging/logging.h"
@@ -378,6 +380,9 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
                          std::shared_ptr<WriteBatchWithIndex> wbwi) {
   if (my_batch != nullptr && KeyStreamMonitor::Instance().enabled()) {
     KeyStreamMonitor::Instance().OnWriteBatch(my_batch);
+  }
+  if (my_batch != nullptr && PhaseController::Instance().enabled()) {
+    PhaseController::Instance().OnWrites(WriteBatchInternal::Count(my_batch));
   }
   assert(!seq_per_batch_ || batch_cnt != 0);
   assert(my_batch == nullptr || my_batch->Count() == 0 ||

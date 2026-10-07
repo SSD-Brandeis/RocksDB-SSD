@@ -8,6 +8,7 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 #include "db/db_impl/db_impl.h"
 #include "db/key_stream_monitor.h"
+#include "db/phase_controller.h"
 
 #include <cstdint>
 #ifdef OS_SOLARIS
@@ -510,6 +511,7 @@ void DBImpl::UntrackDataFiles() {
 
 Status DBImpl::CloseHelper() {
   KeyStreamMonitor::Instance().Detach();
+  PhaseController::Instance().Detach();
   // Guarantee that there is no background error recovery in progress before
   // continuing with the shutdown
   mutex_.Lock();
@@ -2335,6 +2337,9 @@ Status DBImpl::GetImpl(const ReadOptions& read_options, const Slice& key,
   if (KeyStreamMonitor::Instance().enabled()) {
     KeyStreamMonitor::Instance().OnGet(key);
   }
+  if (PhaseController::Instance().enabled()) {
+    PhaseController::Instance().OnGets(1);
+  }
   assert(get_impl_options.value != nullptr ||
          get_impl_options.merge_operands != nullptr ||
          get_impl_options.columns != nullptr);
@@ -2822,6 +2827,9 @@ void DBImpl::MultiGet(const ReadOptions& _read_options, const size_t num_keys,
     for (size_t i = 0; i < num_keys; ++i) {
       KeyStreamMonitor::Instance().OnGet(keys[i]);
     }
+  }
+  if (PhaseController::Instance().enabled()) {
+    PhaseController::Instance().OnGets(num_keys);
   }
   if (_read_options.io_activity != Env::IOActivity::kUnknown &&
       _read_options.io_activity != Env::IOActivity::kMultiGet) {

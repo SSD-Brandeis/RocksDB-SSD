@@ -10,6 +10,7 @@
 
 #include "db/builder.h"
 #include "db/key_stream_monitor.h"
+#include "db/phase_controller.h"
 #include "db/db_impl/db_impl.h"
 #include "db/error_handler.h"
 #include "db/periodic_task_scheduler.h"
@@ -2232,8 +2233,20 @@ Status DB::Open(const DBOptions& db_options, const std::string& dbname,
   ThreadStatusUtil::SetThreadOperation(ThreadStatus::OperationType::OP_DBOPEN);
   bool can_retry = false;
   Status s;
+  std::vector<ColumnFamilyDescriptor> cfs = column_families;
+  if (PhaseController::Instance().enabled()) {
+    for (auto& cf : cfs) {
+      if (cf.name == kDefaultColumnFamilyName) {
+        s = PhaseController::Instance().Configure(&cf.options);
+        if (!s.ok()) {
+          ThreadStatusUtil::ResetThreadStatus();
+          return s;
+        }
+      }
+    }
+  }
   do {
-    s = DBImpl::Open(db_options, dbname, column_families, handles, dbptr,
+    s = DBImpl::Open(db_options, dbname, cfs, handles, dbptr,
                      !kSeqPerBatch, kBatchPerTxn, can_retry, &can_retry);
   } while (!s.ok() && can_retry);
   ThreadStatusUtil::ResetThreadStatus();
@@ -2662,6 +2675,7 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
 
   if (s.ok()) {
     KeyStreamMonitor::Instance().Attach(impl->immutable_db_options_.info_log);
+    PhaseController::Instance().Attach(impl.get(), impl->immutable_db_options_.info_log);
     ROCKS_LOG_HEADER(impl->immutable_db_options_.info_log, "DB pointer %p",
                      impl.get());
     LogFlush(impl->immutable_db_options_.info_log);
