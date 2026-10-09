@@ -2234,10 +2234,11 @@ Status DB::Open(const DBOptions& db_options, const std::string& dbname,
   bool can_retry = false;
   Status s;
   std::vector<ColumnFamilyDescriptor> cfs = column_families;
+  DBOptions opened = db_options;
   if (PhaseController::Instance().enabled()) {
     for (auto& cf : cfs) {
       if (cf.name == kDefaultColumnFamilyName) {
-        s = PhaseController::Instance().Configure(&cf.options);
+        s = PhaseController::Instance().Configure(&cf.options, &opened);
         if (!s.ok()) {
           ThreadStatusUtil::ResetThreadStatus();
           return s;
@@ -2246,7 +2247,7 @@ Status DB::Open(const DBOptions& db_options, const std::string& dbname,
     }
   }
   do {
-    s = DBImpl::Open(db_options, dbname, cfs, handles, dbptr,
+    s = DBImpl::Open(opened, dbname, cfs, handles, dbptr,
                      !kSeqPerBatch, kBatchPerTxn, can_retry, &can_retry);
   } while (!s.ok() && can_retry);
   ThreadStatusUtil::ResetThreadStatus();

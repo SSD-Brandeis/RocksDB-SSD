@@ -40,22 +40,29 @@ class PhaseController : public MemtableAdvisor {
     return names[kind];
   }
 
-  Status Configure(ColumnFamilyOptions* cf) {
+  Status Configure(ColumnFamilyOptions* cf, DBOptions* db) {
     std::lock_guard<std::mutex> g(mu_);
     Status s = Load();
     if (!s.ok()) return s;
     ConfigOptions co;
     co.ignore_unknown_options = false;
     co.input_strings_escaped = false;
+    ColumnFamilyOptions base;
+    s = GetColumnFamilyOptionsFromMap(co, *cf, global_cf_, &base);
+    if (!s.ok()) return Status::InvalidArgument("phase policy [global]: " + s.ToString());
+    DBOptions dbo;
+    s = GetDBOptionsFromMap(co, *db, global_db_, &dbo);
+    if (!s.ok()) return Status::InvalidArgument("phase policy [global]: " + s.ToString());
+    *db = dbo;
     for (int k = 0; k < kKinds; ++k) {
       ColumnFamilyOptions probe;
-      s = GetColumnFamilyOptionsFromMap(co, *cf, sets_[k].options, &probe);
+      s = GetColumnFamilyOptionsFromMap(co, base, sets_[k].options, &probe);
       if (!s.ok()) {
         return Status::InvalidArgument(std::string("phase policy [") + Name(k) + "]: " + s.ToString());
       }
     }
     ColumnFamilyOptions out;
-    s = GetColumnFamilyOptionsFromMap(co, *cf, sets_[kMixed].options, &out);
+    s = GetColumnFamilyOptionsFromMap(co, base, sets_[kMixed].options, &out);
     if (!s.ok()) return s;
     current_ = kMixed;
     type_.store(sets_[kMixed].factory, std::memory_order_relaxed);
@@ -79,6 +86,9 @@ class PhaseController : public MemtableAdvisor {
                    path_.c_str(), (unsigned long long)kChunkOps, kConfirmChunks,
                    (unsigned long long)kMinPhaseOps, kRangeShare, kDominance, Name(current_),
                    sets_[current_].factory);
+    std::unordered_map<std::string, std::string> global(global_cf_);
+    global.insert(global_db_.begin(), global_db_.end());
+    ROCKS_LOG_INFO(log_, "[phase_controller] global %s", Join(global).c_str());
     for (int k = 0; k < kKinds; ++k) {
       ROCKS_LOG_INFO(log_, "[phase_controller] set %s memtable_factory=%d %s", Name(k), sets_[k].factory,
                      Join(sets_[k].options).c_str());
@@ -133,7 +143,8 @@ class PhaseController : public MemtableAdvisor {
     else if (key == "HashLinkListRepFactory.bucket_count") cfg_.hash_linklist_bucket_count = v;
     else if (key == "HashLinkListRepFactory.threshold") cfg_.linklist_use_skiplist = static_cast<uint32_t>(v);
     else if (key == "HashVectorRepFactory.bucket_count") cfg_.hash_vector_bucket_count = v;
-    else return Status::InvalidArgument("phase policy [global]: unknown key " + key);
+    else if (key == "max_total_wal_size") global_db_[key] = value;
+    else global_cf_[key] = value;
     return Status::OK();
   }
 
@@ -142,6 +153,8 @@ class PhaseController : public MemtableAdvisor {
     if (!in) return Status::InvalidArgument("phase policy: cannot read " + path_);
     for (auto& s : sets_) s = KnobSet();
     cfg_ = DynamicMemtableConfig();
+    global_cf_.clear();
+    global_db_.clear();
     bool seen[kKinds] = {false, false, false, false};
     int section = -2;
     std::string line;
@@ -239,6 +252,8 @@ class PhaseController : public MemtableAdvisor {
   DB* db_ = nullptr;
   std::shared_ptr<Logger> log_;
   KnobSet sets_[kKinds];
+  std::unordered_map<std::string, std::string> global_cf_;
+  std::unordered_map<std::string, std::string> global_db_;
   DynamicMemtableConfig cfg_;
   std::atomic<int> type_{1};
   std::atomic<bool> attached_{false};
