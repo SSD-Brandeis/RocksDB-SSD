@@ -370,7 +370,7 @@ Status DBImpl::IngestWBWIAsMemtable(
   return s;
 }
 
-Status DBImpl::WriteImpl(const WriteOptions& write_options,
+Status DBImpl::WriteImpl(const WriteOptions& caller_write_options,
                          WriteBatch* my_batch, WriteCallback* callback,
                          UserWriteCallback* user_write_cb, uint64_t* wal_used,
                          uint64_t log_ref, bool disable_memtable,
@@ -378,11 +378,17 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
                          PreReleaseCallback* pre_release_callback,
                          PostMemTableCallback* post_memtable_callback,
                          std::shared_ptr<WriteBatchWithIndex> wbwi) {
+  WriteOptions phase_write_options;
+  const WriteOptions& write_options =
+      PhaseController::Instance().enabled()
+          ? PhaseController::Instance().ForWrite(caller_write_options, &phase_write_options)
+          : caller_write_options;
   if (my_batch != nullptr && KeyStreamMonitor::Instance().enabled()) {
     KeyStreamMonitor::Instance().OnWriteBatch(my_batch);
   }
   if (my_batch != nullptr && PhaseController::Instance().enabled()) {
-    PhaseController::Instance().OnWrites(WriteBatchInternal::Count(my_batch));
+    PhaseController::Instance().OnWrites(WriteBatchInternal::Count(my_batch),
+                                         my_batch->GetDataSize() - WriteBatchInternal::kHeader);
   }
   assert(!seq_per_batch_ || batch_cnt != 0);
   assert(my_batch == nullptr || my_batch->Count() == 0 ||

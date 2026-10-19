@@ -98,6 +98,8 @@ GenericRateLimiter::~GenericRateLimiter() {
 void GenericRateLimiter::SetBytesPerSecond(int64_t bytes_per_second) {
   MutexLock g(&request_mutex_);
   SetBytesPerSecondLocked(bytes_per_second);
+  available_bytes_ = std::min(
+      available_bytes_, refill_bytes_per_period_.load(std::memory_order_relaxed));
 }
 
 void GenericRateLimiter::SetBytesPerSecondLocked(int64_t bytes_per_second) {

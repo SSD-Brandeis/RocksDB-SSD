@@ -2187,6 +2187,9 @@ Status DBImpl::Get(const ReadOptions& _read_options,
   }
 
   ReadOptions read_options(_read_options);
+  if (PhaseController::Instance().enabled()) {
+    PhaseController::Instance().ForRead(&read_options);
+  }
   if (read_options.io_activity == Env::IOActivity::kUnknown) {
     read_options.io_activity = Env::IOActivity::kGet;
   }
@@ -2844,6 +2847,9 @@ void DBImpl::MultiGet(const ReadOptions& _read_options, const size_t num_keys,
     return;
   }
   ReadOptions read_options(_read_options);
+  if (PhaseController::Instance().enabled()) {
+    PhaseController::Instance().ForRead(&read_options);
+  }
   if (read_options.io_activity == Env::IOActivity::kUnknown) {
     read_options.io_activity = Env::IOActivity::kMultiGet;
   }
@@ -3125,6 +3131,9 @@ void DBImpl::MultiGetWithCallback(
   }
 
   ReadOptions read_options(_read_options);
+  if (PhaseController::Instance().enabled()) {
+    PhaseController::Instance().ForRead(&read_options);
+  }
   if (read_options.io_activity == Env::IOActivity::kUnknown) {
     read_options.io_activity = Env::IOActivity::kMultiGet;
   }
@@ -3872,6 +3881,9 @@ Iterator* DBImpl::NewIterator(const ReadOptions& _read_options,
         "`Env::IOActivity::kUnknown` or `Env::IOActivity::kDBIterator`"));
   }
   ReadOptions read_options(_read_options);
+  if (PhaseController::Instance().enabled()) {
+    PhaseController::Instance().ForRead(&read_options);
+  }
   if (read_options.io_activity == Env::IOActivity::kUnknown) {
     read_options.io_activity = Env::IOActivity::kDBIterator;
   }
@@ -4076,6 +4088,9 @@ Status DBImpl::NewIterators(
         "`Env::IOActivity::kUnknown` or `Env::IOActivity::kDBIterator`");
   }
   ReadOptions read_options(_read_options);
+  if (PhaseController::Instance().enabled()) {
+    PhaseController::Instance().ForRead(&read_options);
+  }
   if (read_options.io_activity == Env::IOActivity::kUnknown) {
     read_options.io_activity = Env::IOActivity::kDBIterator;
   }
