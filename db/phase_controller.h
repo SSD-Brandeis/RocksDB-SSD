@@ -59,10 +59,10 @@ class PhaseController : public MemtableAdvisor {
     co.input_strings_escaped = false;
     ColumnFamilyOptions base;
     s = GetColumnFamilyOptionsFromMap(co, *cf, global_cf_, &base);
-    if (!s.ok()) return Status::InvalidArgument("phase policy [global]: " + s.ToString());
+    if (!s.ok()) return Status::InvalidArgument("phase config [global]: " + s.ToString());
     DBOptions dbo;
     s = GetDBOptionsFromMap(co, *db, global_db_, &dbo);
-    if (!s.ok()) return Status::InvalidArgument("phase policy [global]: " + s.ToString());
+    if (!s.ok()) return Status::InvalidArgument("phase config [global]: " + s.ToString());
     for (int k = 0; k < kKinds; ++k) {
       ColumnFamilyOptions probe;
       s = GetColumnFamilyOptionsFromMap(co, base, sets_[k].options, &probe);
@@ -71,7 +71,7 @@ class PhaseController : public MemtableAdvisor {
         s = GetDBOptionsFromMap(co, dbo, DbOptions(sets_[k]), &probe_db);
       }
       if (!s.ok()) {
-        return Status::InvalidArgument(std::string("phase policy [") + Name(k) + "]: " + s.ToString());
+        return Status::InvalidArgument(std::string("phase config [") + Name(k) + "]: " + s.ToString());
       }
       wbs_[k] = probe.write_buffer_size;
     }
@@ -111,7 +111,7 @@ class PhaseController : public MemtableAdvisor {
     ops_ = 0;
     ring_n_ = ring_head_ = 0;
     pending_ = 0;
-    ROCKS_LOG_INFO(log_, "[phase_controller] policy=%s windows_per_buffer=%llu min_window_ops=%llu max_window_ops=%llu "
+    ROCKS_LOG_INFO(log_, "[phase_controller] config=%s windows_per_buffer=%llu min_window_ops=%llu max_window_ops=%llu "
                    "confirm_windows=%d shift_distance=%.2f margin_sd=%.1f range_share=%.2f dominance=%.2f start=%s "
                    "memtable_factory=%d write_buffer_size=%llu",
                    path_.c_str(), (unsigned long long)kWindowsPerBuffer, (unsigned long long)kMinWindowOps,
@@ -230,7 +230,7 @@ class PhaseController : public MemtableAdvisor {
   }
 
   PhaseController() {
-    const char* v = std::getenv("ROCKSDB_PHASE_POLICY");
+    const char* v = std::getenv("ROCKSDB_PHASE_CONFIG");
     path_ = v ? v : "";
     enabled_ = !path_.empty();
   }
@@ -269,28 +269,28 @@ class PhaseController : public MemtableAdvisor {
   }
 
   Status Check() const {
-    if (refill_period_us_ <= 0) return Status::InvalidArgument("phase policy: NewGenericRateLimiter.refill_period_us must be > 0");
-    if (fairness_ <= 0) return Status::InvalidArgument("phase policy: NewGenericRateLimiter.fairness must be > 0");
+    if (refill_period_us_ <= 0) return Status::InvalidArgument("phase config: NewGenericRateLimiter.refill_period_us must be > 0");
+    if (fairness_ <= 0) return Status::InvalidArgument("phase config: NewGenericRateLimiter.fairness must be > 0");
     if (mode_ == kBadName)
-      return Status::InvalidArgument("phase policy: NewGenericRateLimiter.mode must be kReadsOnly, kWritesOnly or kAllIo");
+      return Status::InvalidArgument("phase config: NewGenericRateLimiter.mode must be kReadsOnly, kWritesOnly or kAllIo");
     for (int k = 0; k < kKinds; ++k) {
       const KnobSet& s = sets_[k];
       if (s.write_priority == kBadName ||
           (s.write_priority >= 0 && s.write_priority != Env::IO_USER && s.write_priority != Env::IO_TOTAL))
-        return Status::InvalidArgument(std::string("phase policy [") + Name(k) +
+        return Status::InvalidArgument(std::string("phase config [") + Name(k) +
                                        "]: WriteOptions.rate_limiter_priority must be IO_USER or IO_TOTAL");
       if (s.read_priority == kBadName)
-        return Status::InvalidArgument(std::string("phase policy [") + Name(k) +
+        return Status::InvalidArgument(std::string("phase config [") + Name(k) +
                                        "]: ReadOptions.rate_limiter_priority must be IO_LOW, IO_MID, IO_HIGH, IO_USER or IO_TOTAL");
       if (s.single_burst_bytes < -1 || s.rate_bytes_per_sec < -1)
-        return Status::InvalidArgument(std::string("phase policy [") + Name(k) + "]: rate limiter values must be >= 0");
+        return Status::InvalidArgument(std::string("phase config [") + Name(k) + "]: rate limiter values must be >= 0");
     }
     return Status::OK();
   }
 
   Status Load() {
     std::ifstream in(path_);
-    if (!in) return Status::InvalidArgument("phase policy: cannot read " + path_);
+    if (!in) return Status::InvalidArgument("phase config: cannot read " + path_);
     for (auto& s : sets_) s = KnobSet();
     cfg_ = DynamicMemtableConfig();
     refill_period_us_ = 100 * 1000;
@@ -312,12 +312,12 @@ class PhaseController : public MemtableAdvisor {
         if (name == "global") section = -1;
         for (int k = 0; k < kKinds; ++k)
           if (name == Name(k)) section = k;
-        if (section == -2) return Status::InvalidArgument("phase policy: unknown section " + name);
+        if (section == -2) return Status::InvalidArgument("phase config: unknown section " + name);
         if (section >= 0) seen[section] = true;
         continue;
       }
       const size_t eq = line.find('=');
-      if (eq == std::string::npos || section == -2) return Status::InvalidArgument("phase policy: bad line " + line);
+      if (eq == std::string::npos || section == -2) return Status::InvalidArgument("phase config: bad line " + line);
       const std::string key = Trim(line.substr(0, eq)), value = Trim(line.substr(eq + 1));
       if (section == -1) {
         Status s = Global(key, value);
@@ -329,7 +329,7 @@ class PhaseController : public MemtableAdvisor {
       }
     }
     for (int k = 0; k < kKinds; ++k)
-      if (!seen[k]) return Status::InvalidArgument(std::string("phase policy: missing section ") + Name(k));
+      if (!seen[k]) return Status::InvalidArgument(std::string("phase config: missing section ") + Name(k));
     return Check();
   }
 
