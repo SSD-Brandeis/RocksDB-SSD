@@ -22,7 +22,8 @@ class KeyStreamMonitor {
   static constexpr uint64_t kSampleOneIn = 16;
   static constexpr uint64_t kChunkOps = 10000;
   static constexpr uint64_t kMiB = 1ull << 20;
-  static constexpr uint64_t kRecentMiB[4] = {8, 32, 64, 128};
+  static constexpr int kRecent = 8;
+  static constexpr uint64_t kRecentMiB[kRecent] = {8, 32, 64, 128, 256, 512, 1024, 4096};
 
   static KeyStreamMonitor& Instance() {
     static KeyStreamMonitor m;
@@ -57,7 +58,7 @@ class KeyStreamMonitor {
         chunk_.gets_deleted += 1;
       } else {
         const uint64_t since = bytes_written_ - it->second.last_write_bytes;
-        for (int i = 0; i < 4; ++i)
+        for (int i = 0; i < kRecent; ++i)
           if (since <= kRecentMiB[i] * kMiB) chunk_.gets_recent[i] += 1;
       }
     }
@@ -84,7 +85,7 @@ class KeyStreamMonitor {
   struct Chunk {
     uint64_t ops = 0, puts = 0, merges = 0, puts_ascending = 0, key_bytes = 0, value_bytes = 0;
     uint64_t sampled_puts = 0, sampled_overwrites = 0, sampled_gets = 0;
-    uint64_t gets_never_written = 0, gets_deleted = 0, gets_recent[4] = {0, 0, 0, 0};
+    uint64_t gets_never_written = 0, gets_deleted = 0, gets_recent[kRecent] = {0, 0, 0, 0, 0, 0, 0, 0};
   };
 
   class Handler : public WriteBatch::Handler {
@@ -185,14 +186,18 @@ class KeyStreamMonitor {
           log_,
           "[key_monitor] ops=%llu one_in=%llu accesses=%llu distinct=%llu top1pct=%llu top10pct=%llu gets=%llu "
           "gets_never_written=%llu gets_deleted=%llu gets_written_within_8mb=%llu gets_written_within_32mb=%llu "
-          "gets_written_within_64mb=%llu gets_written_within_128mb=%llu puts=%llu overwrites=%llu "
+          "gets_written_within_64mb=%llu gets_written_within_128mb=%llu gets_written_within_256mb=%llu "
+          "gets_written_within_512mb=%llu gets_written_within_1024mb=%llu gets_written_within_4096mb=%llu "
+          "puts=%llu overwrites=%llu "
           "stream_puts=%llu stream_merges=%llu stream_puts_ascending=%llu stream_key_bytes=%llu stream_value_bytes=%llu",
           (unsigned long long)chunk_.ops, (unsigned long long)kSampleOneIn, (unsigned long long)total,
           (unsigned long long)counts.size(), (unsigned long long)top(0.01), (unsigned long long)top(0.10),
           (unsigned long long)chunk_.sampled_gets, (unsigned long long)chunk_.gets_never_written,
           (unsigned long long)chunk_.gets_deleted, (unsigned long long)chunk_.gets_recent[0],
           (unsigned long long)chunk_.gets_recent[1], (unsigned long long)chunk_.gets_recent[2],
-          (unsigned long long)chunk_.gets_recent[3], (unsigned long long)chunk_.sampled_puts,
+          (unsigned long long)chunk_.gets_recent[3], (unsigned long long)chunk_.gets_recent[4],
+          (unsigned long long)chunk_.gets_recent[5], (unsigned long long)chunk_.gets_recent[6],
+          (unsigned long long)chunk_.gets_recent[7], (unsigned long long)chunk_.sampled_puts,
           (unsigned long long)chunk_.sampled_overwrites, (unsigned long long)chunk_.puts, (unsigned long long)chunk_.merges,
           (unsigned long long)chunk_.puts_ascending, (unsigned long long)chunk_.key_bytes,
           (unsigned long long)chunk_.value_bytes);
